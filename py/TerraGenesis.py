@@ -130,7 +130,7 @@ def getDrainageAreaMap(H):
 DIM = 32 * 4
 
 #uplift = MapGen.genMap(DIM, 5 * 2)
-uplift = MapGen.genSimple(DIM, 10 * 4)
+uplift = MapGen.genSimple(DIM, 10)
 #uplift = cv2.imread('custom_uplift.png', cv2.IMREAD_GRAYSCALE) / 255
 cv2.imwrite("sample_uplift.png", uplift * 255)
 
@@ -164,9 +164,9 @@ for i in range(ITERATIONS):
 	#col[maxErosionPos.y, maxErosionPos.x] = (255, 0, 255)
 	#cv2.imwrite("sample_output.png", col * 255)
 
-	cv2.imwrite("sample_output.png", np.hstack((heights, erosion, steepestSlopeMap, drainageAreaMap / np.max(drainageAreaMap))) * 255)
+	#cv2.imwrite("sample_output.png", np.hstack((heights, erosion, steepestSlopeMap, drainageAreaMap / np.max(drainageAreaMap))) * 255)
 
-	#cv2.imwrite("sample_output.png", heights * 255)
+	cv2.imwrite("sample_output.png", heights * 255)
 
 h_min = np.min(heights)
 h_max = np.max(heights)
