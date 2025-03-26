@@ -72,87 +72,101 @@ def getAllNeighbors(H, v):
 	return output
 
 def getSteepestSlope(H, v):
-	neighbors = getHigherNeighbors(H, v)
+	neighbors = getLowerNeighbors(H, v)
 
 	h = H[v.y, v.x]
 
 	maxSlope = 0
 	for neighbor in neighbors:
-		maxSlope = max(maxSlope, (H[neighbor.y, neighbor.x] - h) / (neighbor - v).len())
+		maxSlope = max(maxSlope, (h - H[neighbor.y, neighbor.x]) / (neighbor - v).len())
 
 	return maxSlope
 
-def setWeights(M, H, w, v):
-	neighbors = getLowerNeighbors(H, v)
-	s_vk = dict()
+def getSteepestSlopeMap(H):
+	steepestSlopeMap = np.zeros_like(H, dtype=np.double)
 
-	h = H[v.y, v.x]
+	for y in range(steepestSlopeMap.shape[0]):
+		for x in range(steepestSlopeMap.shape[1]):
+			steepestSlopeMap[y, x] = getSteepestSlope(H, vec2(x, y))
 
-	s_sum = 0
-	for neighbor in neighbors:
-		s_val = (h - H[neighbor.y, neighbor.x]) / (v - neighbor).len()
-		s_val = pow(s_val, 4)
-		s_vk[neighbor] = s_val
-		s_sum += s_val
+	return steepestSlopeMap
 
-	if s_sum == 0: return
+def getDrainageAreaMap(H):
+	xx, yy = np.meshgrid(np.arange(H.shape[0]), np.arange(H.shape[1]))
+	positions = np.stack([xx.ravel(), yy.ravel()], axis=-1)
+	
+	heights = H.ravel()
+	sortedHeightInd = np.argsort(-heights)
 
-	for neighbor in neighbors:
-		w[(neighbor, v)] = s_vk[neighbor] / s_sum
+	sortedPositions = positions[sortedHeightInd]
 
-def setDrainage(M, H, a, w, v):
-	if (a[v.y, v.x] != -1): return
+	drainageAreaMap = np.ones_like(H, dtype=np.double)
 
-	neighbors = getHigherNeighbors(H, v)
+	tmp = []
+	for position in sortedPositions:
+		pos = vec2(position[0], position[1])
+		height = H[pos.y, pos.x]
 
-	for neighbor in neighbors:
-		setWeights(M, H, w, neighbor)
+		sVals = dict()
+		sValSum = 0
 
-	drainage = 1
-	for neighbor in neighbors:
-		setDrainage(M, H, a, w, neighbor)
-		drainage += w[(v, neighbor)] * a[neighbor.y, neighbor.x]
+		neighbors = getLowerNeighbors(H, pos)
+		for neighbor in neighbors:
+			nHeight = H[neighbor.y, neighbor.x]
 
-	a[v.y, v.x] = drainage
+			sVal = (height - nHeight) / (pos - neighbor).len()
+			sVal = pow(sVal, 4)
 
-def setDrainageMap(M, H, a, w):
-	for y in range(M.shape[0]):
-		for x in range(M.shape[1]):
-			setDrainage(M, H, a, w, vec2(x, y))
+			sVals[neighbor] = sVal
+			sValSum += sVal
 
-DIM = 32
+		if sValSum == 0: continue
 
-#uplift = MapGen.genMap(DIM, 5)
-uplift = MapGen.genSimple(DIM, 10)
+		for neighbor in neighbors:
+			drainageAreaMap[neighbor.y, neighbor.x] += sVals[neighbor] * drainageAreaMap[pos.y, pos.x] / sValSum
+
+	return drainageAreaMap
+
+DIM = 32 * 4
+
+#uplift = MapGen.genMap(DIM, 5 * 2)
+uplift = MapGen.genSimple(DIM, 10 * 4)
+#uplift = cv2.imread('custom_uplift.png', cv2.IMREAD_GRAYSCALE) / 255
 cv2.imwrite("sample_uplift.png", uplift * 255)
-uplift += 1
 
 heights = np.zeros((DIM, DIM))
 drainage = np.full((DIM, DIM), -1)
 weights = dict()
 
-TIME_STEP = 0.1
-ITERATIONS = 20
+ITERATIONS = 1000
 
+#heights = np.zeros((DIM, DIM))
+heights = uplift
 for i in range(ITERATIONS):
-	print(f'ITERATION: {i + 1}')
+	print(f'ITERATION: {i + 1}', f'({np.min(heights)}, {np.max(heights)})')
 
-	setDrainageMap(uplift, heights, drainage, weights)
-	newHeights = np.zeros((DIM, DIM))
-	for y in range(heights.shape[0]):
-		for x in range(heights.shape[1]):
-			v = vec2(x, y)
-			newHeights[y, x] = heights[y, x] + TIME_STEP * (uplift[y, x] - pow(getSteepestSlope(heights, v), 8) * pow(drainage[y, x], 4))
+	steepestSlopeMap = getSteepestSlopeMap(heights)
+	drainageAreaMap = getDrainageAreaMap(heights)
+	nextHeights = np.copy(heights)
 
-	heights = newHeights
-	heights[heights < 0] = 0
+	erosion = np.pow(steepestSlopeMap, 2) * np.pow(drainageAreaMap, 1)
 
-	print(np.min(heights), np.max(heights))
-	print(np.min(drainage), np.max(drainage))
+	nextHeights += uplift * 0.01
+	nextHeights -= erosion * 0.1
+	nextHeights = np.clip(nextHeights, 0, 1)
 
-	drainage = np.full((DIM, DIM), -1)
-	weights = dict()
+	heights = np.copy(nextHeights)
 
+	print(f'EROSION: ({np.min(erosion) * 0.1}, {np.max(erosion) * 0.1})')
+	maxErosionPos = vec2(np.argmax(erosion) // erosion.shape[0], np.argmax(erosion) % erosion.shape[0])
+
+	#col = np.stack((heights, heights, heights), axis=2)
+	#col[maxErosionPos.y, maxErosionPos.x] = (255, 0, 255)
+	#cv2.imwrite("sample_output.png", col * 255)
+
+	cv2.imwrite("sample_output.png", np.hstack((heights, erosion, steepestSlopeMap, drainageAreaMap / np.max(drainageAreaMap))) * 255)
+
+	#cv2.imwrite("sample_output.png", heights * 255)
 
 h_min = np.min(heights)
 h_max = np.max(heights)
@@ -162,4 +176,4 @@ heights -= h_min
 if (h_max - h_min) != 0:
 	heights /= (h_max - h_min)
 
-cv2.imwrite("sample_output.png", heights * 255)
+#cv2.imwrite("sample_output.png", heights * 255)

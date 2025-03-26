@@ -39,6 +39,7 @@ def genSimple(dim=512, blur=50):
 	m = genCircle(dim, 0, 1, (-dim // 6, -dim // 6))
 	m += genCircle(dim, 0, 1, (dim // 6, -dim // 6))
 	m += genCircle(dim, 0, 1, (dim // 6, dim // 6))
+	m += np.random.normal(0, 0.25, (dim, dim)) * 0.1
 	m = cv2.GaussianBlur(m, (blur, blur), 0)
 
 	m_min = np.min(m)
