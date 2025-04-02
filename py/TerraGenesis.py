@@ -4,6 +4,8 @@ import math
 
 import MapGen
 
+import time
+
 class vec2:
 	def __init__(self, x, y):
 		self.x = x
@@ -71,7 +73,7 @@ def getAllNeighbors(H, v):
 
 	return output
 
-def getSteepestSlope(H, v):
+def getSteepestSlope_OLD(H, v):
 	neighbors = getLowerNeighbors(H, v)
 
 	h = H[v.y, v.x]
@@ -82,12 +84,37 @@ def getSteepestSlope(H, v):
 
 	return maxSlope
 
+offsets = [
+	vec2(-1, -1),
+	vec2( 0, -1),
+	vec2( 1, -1),
+	vec2(-1,  0),
+	vec2( 1,  0),
+	vec2(-1,  1),
+	vec2( 0,  1),
+	vec2( 1,  1),
+]
+
+offset_dist = [offset.len() for offset in offsets]
+
 def getSteepestSlopeMap(H):
+	padded_H = np.pad(H, (1, 1), 'edge')
+	slopes = np.stack([padded_H[1 + offset.y:offset.y - 1 or None, 1 + offset.x:offset.x - 1 or None] for offset in offsets])
+
+	higher_neighbors = H < slopes
+	slopes = (H - slopes) / np.reshape(offset_dist, (8, 1, 1))
+	slopes[higher_neighbors] = -1
+
+	max_slopes = np.max(slopes, axis=0, initial=0)
+
+	return max_slopes
+
+def getSteepestSlopeMap_OLD(H):
 	steepestSlopeMap = np.zeros_like(H, dtype=np.double)
 
 	for y in range(steepestSlopeMap.shape[0]):
 		for x in range(steepestSlopeMap.shape[1]):
-			steepestSlopeMap[y, x] = getSteepestSlope(H, vec2(x, y))
+			steepestSlopeMap[y, x] = getSteepestSlope_OLD(H, vec2(x, y))
 
 	return steepestSlopeMap
 
