@@ -1,4 +1,5 @@
 import numpy as np
+from scipy import signal
 import cv2
 import math
 
@@ -118,6 +119,23 @@ def getSteepestSlopeMap_OLD(H):
 
 	return steepestSlopeMap
 
+def getWeightMap(H):
+	# Create an 8xMxN matrix [offset, y, x]->weight
+	padded_H = np.pad(H, (1, 1), mode='constant', constant_values=(2))
+	weights = np.stack([padded_H[1 + offset.y:offset.y - 1 or None, 1 + offset.x:offset.x - 1 or None] for offset in offsets], axis=2)
+
+	higher_neighbors = H[..., np.newaxis] < weights
+	weights = np.pow((weights - H[..., np.newaxis]) / np.reshape(offset_dist, (1, 1, 8)), 4)
+	weights[higher_neighbors] = 0
+
+	weight_sums = np.sum(weights, axis=2)
+	weights = np.divide(weights, weight_sums[..., np.newaxis], where=weight_sums[..., np.newaxis] != 0)
+
+	weights = np.insert(weights, 4, np.zeros_like(H), axis=2)
+	weights = np.reshape(weights, (weights.shape[0], weights.shape[1], 3, 3))
+
+	return weights
+
 def getDrainageAreaMap(H):
 	xx, yy = np.meshgrid(np.arange(H.shape[0]), np.arange(H.shape[1]))
 	positions = np.stack([xx.ravel(), yy.ravel()], axis=-1)
@@ -127,38 +145,22 @@ def getDrainageAreaMap(H):
 
 	sortedPositions = positions[sortedHeightInd]
 
-	drainageAreaMap = np.ones_like(H, dtype=np.double)
+	drainageAreaMap = np.pad(np.ones_like(H, dtype=np.double), (1, 1))
+
+	weights = getWeightMap(H)
 
 	tmp = []
 	for position in sortedPositions:
 		pos = vec2(position[0], position[1])
 		height = H[pos.y, pos.x]
 
-		sVals = dict()
-		sValSum = 0
+		drainageAreaMap[pos.y:pos.y+3, pos.x:pos.x+3] += weights[pos.y, pos.x] * drainageAreaMap[pos.y + 1, pos.x + 1]
 
-		neighbors = getLowerNeighbors(H, pos)
-		for neighbor in neighbors:
-			nHeight = H[neighbor.y, neighbor.x]
-
-			sVal = (height - nHeight) / (pos - neighbor).len()
-			sVal = pow(sVal, 4)
-
-			sVals[neighbor] = sVal
-			sValSum += sVal
-
-		if sValSum == 0: continue
-
-		for neighbor in neighbors:
-			drainageAreaMap[neighbor.y, neighbor.x] += sVals[neighbor] * drainageAreaMap[pos.y, pos.x] / sValSum
-
-	return drainageAreaMap
+	return drainageAreaMap[1:-1,1:-1]
 
 DIM = 32 * 4
 
-#uplift = MapGen.genMap(DIM, 5 * 2)
 uplift = MapGen.genSimple(DIM, 10)
-#uplift = cv2.imread('custom_uplift.png', cv2.IMREAD_GRAYSCALE) / 255
 cv2.imwrite("sample_uplift.png", uplift * 255)
 
 heights = np.zeros((DIM, DIM))
@@ -167,10 +169,11 @@ weights = dict()
 
 ITERATIONS = 1000
 
-#heights = np.zeros((DIM, DIM))
 heights = uplift
 for i in range(ITERATIONS):
-	print(f'ITERATION: {i + 1}', f'({np.min(heights)}, {np.max(heights)})')
+	print(f'ITERATION: {i + 1}')
+
+	start = time.time()
 
 	steepestSlopeMap = getSteepestSlopeMap(heights)
 	drainageAreaMap = getDrainageAreaMap(heights)
@@ -182,25 +185,9 @@ for i in range(ITERATIONS):
 	nextHeights -= erosion * 0.1
 	nextHeights = np.clip(nextHeights, 0, 1)
 
-	heights = np.copy(nextHeights)
+	heights = nextHeights
 
-	print(f'EROSION: ({np.min(erosion) * 0.1}, {np.max(erosion) * 0.1})')
-	maxErosionPos = vec2(np.argmax(erosion) // erosion.shape[0], np.argmax(erosion) % erosion.shape[0])
+	cv2.imwrite("sample_output.png", cv2.resize(heights * 255, (720, 720), interpolation=cv2.INTER_NEAREST))
 
-	#col = np.stack((heights, heights, heights), axis=2)
-	#col[maxErosionPos.y, maxErosionPos.x] = (255, 0, 255)
-	#cv2.imwrite("sample_output.png", col * 255)
-
-	#cv2.imwrite("sample_output.png", np.hstack((heights, erosion, steepestSlopeMap, drainageAreaMap / np.max(drainageAreaMap))) * 255)
-
-	cv2.imwrite("sample_output.png", heights * 255)
-
-h_min = np.min(heights)
-h_max = np.max(heights)
-
-heights -= h_min
-
-if (h_max - h_min) != 0:
-	heights /= (h_max - h_min)
-
-#cv2.imwrite("sample_output.png", heights * 255)
+	end = time.time()
+	print(f'TIME: {end - start}')
