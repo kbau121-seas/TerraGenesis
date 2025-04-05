@@ -7,100 +7,22 @@ import MapGen
 
 import time
 
-class vec2:
-	def __init__(self, x, y):
-		self.x = x
-		self.y = y
+offsets = np.array([
+	[-1, -1],
+	[-1,  0],
+	[-1,  1],
+	[ 0, -1],
+	[ 0,  1],
+	[ 1, -1],
+	[ 1,  0],
+	[ 1,  1],
+	])
 
-	def __add__(self, o):
-		return vec2(self.x + o.x, self.y + o.y)
-
-	def __sub__(self, o):
-		return vec2(self.x - o.x, self.y - o.y)
-
-	def len2(self):
-		return self.x * self.x + self.y * self.y
-
-	def len(self):
-		return math.sqrt(self.len2())
-
-	def __str__(self):
-		return f'({self.x}, {self.y})'
-
-	def __eq__(self, other):
-		return self.x == other.x and self.y == other.y
-
-	def __hash__(self):
-		return hash(self.x + self.y)
-
-def getHigherNeighbors(H, v):
-	output = []
-
-	height = H[v.y, v.x]
-	neighbors = getAllNeighbors(H, v)
-
-	for neighbor in neighbors:
-		other = H[neighbor.y, neighbor.x]
-		if height < other:
-			output += [neighbor]
-
-	return output
-
-def getLowerNeighbors(H, v):
-	output = []
-
-	height = H[v.y, v.x]
-	neighbors = getAllNeighbors(H, v)
-
-	for neighbor in neighbors:
-		other = H[neighbor.y, neighbor.x]
-		if height > other:
-			output += [neighbor]
-
-	return output
-
-def getAllNeighbors(H, v):
-	output = []
-
-	s = H.shape
-	ys = range(max(0, v.y - 1), min(v.y + 2, s[0]))
-	xs = range(max(0, v.x - 1), min(v.x + 2, s[1]))
-
-	for y in ys:
-		for x in xs:
-			if (x == v.x and y == v.y): continue
-
-			output += [vec2(x, y)]
-
-	return output
-
-def getSteepestSlope_OLD(H, v):
-	neighbors = getLowerNeighbors(H, v)
-
-	h = H[v.y, v.x]
-
-	maxSlope = 0
-	for neighbor in neighbors:
-		maxSlope = max(maxSlope, (h - H[neighbor.y, neighbor.x]) / (neighbor - v).len())
-
-	return maxSlope
-
-offsets = [
-	vec2(-1, -1),
-	vec2( 0, -1),
-	vec2( 1, -1),
-	vec2(-1,  0),
-	vec2( 1,  0),
-	vec2(-1,  1),
-	vec2( 0,  1),
-	vec2( 1,  1),
-]
-
-offset_dist = [offset.len() for offset in offsets]
+offset_dist = np.sqrt(np.sum(offsets*offsets, axis=1))
 
 def getSteepestSlopeMap(H):
 	padded_H = np.pad(H, (1, 1), 'edge')
-	slopes = np.stack([padded_H[1 + offset.y:offset.y - 1 or None, 1 + offset.x:offset.x - 1 or None] for offset in offsets])
+	slopes = np.stack([padded_H[1 + offset[0]:offset[0] - 1 or None, 1 + offset[1]:offset[1] - 1 or None] for offset in offsets])
 
 	higher_neighbors = H < slopes
 	slopes = (H - slopes) / np.reshape(offset_dist, (8, 1, 1))
@@ -110,19 +32,10 @@ def getSteepestSlopeMap(H):
 
 	return max_slopes
 
-def getSteepestSlopeMap_OLD(H):
-	steepestSlopeMap = np.zeros_like(H, dtype=np.double)
-
-	for y in range(steepestSlopeMap.shape[0]):
-		for x in range(steepestSlopeMap.shape[1]):
-			steepestSlopeMap[y, x] = getSteepestSlope_OLD(H, vec2(x, y))
-
-	return steepestSlopeMap
-
 def getWeightMap(H):
-	# Create an 8xMxN matrix [offset, y, x]->weight
+	# Create an MxNx3x3 matrix [y, x]->weight_matrix
 	padded_H = np.pad(H, (1, 1), mode='constant', constant_values=(2))
-	weights = np.stack([padded_H[1 + offset.y:offset.y - 1 or None, 1 + offset.x:offset.x - 1 or None] for offset in offsets], axis=2)
+	weights = np.stack([padded_H[1 + offset[0]:offset[0] - 1 or None, 1 + offset[1]:offset[1] - 1 or None] for offset in offsets], axis=2)
 
 	higher_neighbors = H[..., np.newaxis] < weights
 	weights = np.pow((weights - H[..., np.newaxis]) / np.reshape(offset_dist, (1, 1, 8)), 4)
@@ -138,7 +51,7 @@ def getWeightMap(H):
 
 def getDrainageAreaMap(H):
 	xx, yy = np.meshgrid(np.arange(H.shape[0]), np.arange(H.shape[1]))
-	positions = np.stack([xx.ravel(), yy.ravel()], axis=-1)
+	positions = np.stack([yy.ravel(), xx.ravel()], axis=-1)
 	
 	heights = H.ravel()
 	sortedHeightInd = np.argsort(-heights)
@@ -150,11 +63,9 @@ def getDrainageAreaMap(H):
 	weights = getWeightMap(H)
 
 	tmp = []
-	for position in sortedPositions:
-		pos = vec2(position[0], position[1])
-		height = H[pos.y, pos.x]
-
-		drainageAreaMap[pos.y:pos.y+3, pos.x:pos.x+3] += weights[pos.y, pos.x] * drainageAreaMap[pos.y + 1, pos.x + 1]
+	for pos in sortedPositions:
+		height = H[pos[0], pos[1]]
+		drainageAreaMap[pos[0]:pos[0]+3, pos[1]:pos[1]+3] += weights[pos[0], pos[1]] * drainageAreaMap[pos[0] + 1, pos[1] + 1]
 
 	return drainageAreaMap[1:-1,1:-1]
 
