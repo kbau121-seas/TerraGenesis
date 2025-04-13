@@ -161,7 +161,7 @@ class TerrainGenTask1Node(ompx.MPxNode):
 
         meshObj = meshFn.create(numVerts, numPolys, pointsArray, countsArray, connectsArray, meshdata)
 
-
+       
 
         # meshObj:om.MObject= meshFn.create(pointsArray,countsArray, connectsArray, meshdata)
 
@@ -242,6 +242,13 @@ def create_terrain_node():
     meshShape = cmds.createNode("mesh", parent=transformName, name="terrainMesh#")
     # connect output mesh to inmesh
     cmds.connectAttr(newNode + ".outputMesh", meshShape + ".inMesh", force=True)
+    shaderName = cmds.shadingNode("lambert", asShader=True, name="grayShader#")
+    cmds.setAttr(shaderName + ".color", 0.5, 0.5, 0.5, type="double3")
+   
+    shadingGroup = cmds.sets(renderable=True, noSurfaceShader=True, empty=True, name=shaderName + "SG")
+    cmds.connectAttr(shaderName + ".outColor", shadingGroup + ".surfaceShader", force=True)
+
+    cmds.sets(meshShape, edit=True, forceElement=shadingGroup)
     return newNode
 
 # Plugin initialization functions
