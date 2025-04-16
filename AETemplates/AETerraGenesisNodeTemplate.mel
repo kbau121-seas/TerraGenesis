@@ -1,0 +1,97 @@
+// State tracking variable
+global int $isRunning = 0;
+
+global proc start(string $nodeName)
+{
+    global int $isRunning;
+
+    if ($isRunning) return;
+    $isRunning = 1;
+
+    setAttr ($nodeName + "doRun") $isRunning;
+
+    updateControls($nodeName);
+}
+
+global proc pause(string $nodeName)
+{
+	global int $isRunning;
+
+    if (!$isRunning) return;
+    $isRunning = 0;
+
+    setAttr ($nodeName + "doRun") $isRunning;
+
+    updateControls($nodeName);
+}
+
+global proc reset(string $nodeName)
+{
+	global int $isRunning;
+
+    if (!$isRunning) return;
+    $isRunning = 0;
+
+    setAttr ($nodeName + "doRun") $isRunning;
+    
+    updateControls($nodeName);
+}
+
+global proc updateControls(string $nodeName)
+{
+	global int $isRunning;
+
+	button -e -enable (!$isRunning) btnStart;
+	button -e -enable ($isRunning) btnPause;
+	button -e -enable ($isRunning) btnReset;
+
+	setAttr -l ($isRunning) ($nodeName + "upliftFile");
+    setAttr -l ($isRunning) ($nodeName + "gridSizeX");
+    setAttr -l ($isRunning) ($nodeName + "gridSizeZ");
+}
+
+global proc AE_addSimulationControls(string $nodeName)
+{
+	formLayout simulationControlForm;
+
+    button -label "Start" -command ("start(\"" + $nodeName + "\")") btnStart;
+    button -label "Pause" -command ("pause(\"" + $nodeName + "\")") btnPause;
+    button -label "Reset" -command ("reset(\"" + $nodeName + "\")") btnReset;
+
+    // Attach the buttons side by side and stretch
+	formLayout -edit
+	    -attachPosition btnStart "right" 0 32
+	    -attachPosition btnPause "right" 0 66
+	    -attachPosition btnReset "right" 0 100
+
+	    -attachPosition btnStart "left" 0 0
+	    -attachPosition btnPause "left" 0 34
+	    -attachPosition btnReset "left" 0 68
+	    simulationControlForm;
+
+	updateControls($nodeName);
+}
+
+global proc AETerraGenesisNodeTemplate(string $nodeInfo)
+{
+	string $nodeInfoArr[];
+	tokenize $nodeInfo "." $nodeInfoArr;
+	string $nodeName = $nodeInfoArr[1];
+
+    editorTemplate -beginScrollLayout;
+
+    // Add Simulation Startup Attributes
+    editorTemplate -beginLayout "Simulation" -collapse 0;
+    	editorTemplate -callCustom "AE_addSimulationControls" "" $nodeName;
+
+    	editorTemplate -addControl "upliftFile";
+        editorTemplate -addControl "gridSizeX";
+        editorTemplate -addControl "gridSizeZ";
+    editorTemplate -endLayout;
+
+    // Add extra controls, groupings, or custom widgets as needed
+
+    editorTemplate -addExtraControls;
+
+    editorTemplate -endScrollLayout;
+}
