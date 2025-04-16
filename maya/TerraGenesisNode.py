@@ -7,6 +7,13 @@ import numpy as np
 from PIL import Image
 import threading
 
+from PySide2 import QtWidgets, QtCore, QtGui
+from PySide2.QtCore import Qt
+from shiboken2 import wrapInstance
+import maya.OpenMayaUI as omui
+
+from scipy import signal
+
 import TerraGenesis
 
 # Utility functions for setting attribute flags
@@ -21,6 +28,110 @@ def setOutputAttr(attr):
     attr.storable = False
     attr.readable = True
     attr.writable = False
+
+def get_maya_main_window():
+    main_window_ptr = omui.MQtUtil.mainWindow()
+    return wrapInstance(int(main_window_ptr), QtWidgets.QMainWindow)
+
+class PaintWidget(QtWidgets.QWidget):
+    def __init__(self, upliftMap, callback, parent=None):
+        super(PaintWidget, self).__init__(parent)
+        self.setMinimumHeight(upliftMap.shape[0])
+        self.setMinimumWidth(upliftMap.shape[1])
+        self.setSizePolicy(QtWidgets.QSizePolicy.Expanding, QtWidgets.QSizePolicy.Expanding)
+
+        self.points = []
+        self.upliftMap = (upliftMap * 255).astype(np.uint8)
+        self.callback = callback
+        
+        brushWidth = 7
+        gkern1d = signal.windows.gaussian(brushWidth, std=3).reshape(brushWidth, 1)
+        self.brush = np.outer(gkern1d, gkern1d)
+        self.brush = self.brush / np.max(self.brush)
+
+    def mouseMoveEvent(self, event):
+        image_h, image_w = self.upliftMap.shape
+
+        # Get scale factor between image and widget
+        widget_w, widget_h = self.width(), self.height()
+        scale = min(widget_w / image_w, widget_h / image_h)
+
+        # Get top-left origin for centering the image
+        offset_x = (widget_w - (image_w * scale)) / 2
+        offset_y = (widget_h - (image_h * scale)) / 2
+
+        # Convert widget-space click to image-space
+        x = int((event.x() - offset_x) / scale)
+        y = int((event.y() - offset_y) / scale)
+
+        if 0 <= x < image_w and 0 <= y < image_h:
+            # self.points.append((x, y))
+            self.upliftMap[y:y+7, x:x+7] += (self.brush * 5).astype(np.uint8)
+            self.callback(self.upliftMap.astype(np.float32) / 255)
+            self.update()
+
+    def paintEvent(self, event):
+        painter = QtGui.QPainter(self)
+        painter.setRenderHint(QtGui.QPainter.SmoothPixmapTransform)
+        painter.fillRect(self.rect(), QtGui.QColor("#1e1e1e"))
+
+        if self.upliftMap is not None:
+            image_h, image_w = self.upliftMap.shape
+            widget_w, widget_h = self.width(), self.height()
+
+            # Scaling
+            scale = min(widget_w / image_w, widget_h / image_h)
+
+            # Centering offset
+            offset_x = (widget_w - (image_w * scale)) / 2
+            offset_y = (widget_h - (image_h * scale)) / 2
+
+            # Create QImage
+            qimage = QtGui.QImage(
+                self.upliftMap.data, image_w, image_h, image_w,
+                QtGui.QImage.Format_Grayscale8
+            )
+
+            pixmap = QtGui.QPixmap.fromImage(qimage).scaled(
+                image_w * scale, image_h * scale,
+                QtCore.Qt.KeepAspectRatio, QtCore.Qt.SmoothTransformation
+            )
+            painter.drawPixmap(offset_x, offset_y, pixmap)
+
+            # Draw Points
+            point_radius = 4
+            pen = QtGui.QPen(QtCore.Qt.green)
+            brush = QtGui.QBrush(QtCore.Qt.green)
+            painter.setPen(pen)
+            painter.setBrush(brush)
+
+            for x, y in self.points:
+                px = x * scale + offset_x
+                py = y * scale + offset_y
+                painter.drawEllipse(QtCore.QPointF(px, py), point_radius, point_radius)
+
+        painter.end()
+
+class EditorUI(QtWidgets.QDialog):
+    def __init__(self, upliftMap, callback, parent=get_maya_main_window()):
+        super(EditorUI, self).__init__(parent)
+
+        self.upliftMap = upliftMap
+        self.callback = callback
+
+        self.setWindowTitle("Parameter Editor")
+        self.setMinimumWidth(350)
+        self.setWindowFlags(self.windowFlags() ^ QtCore.Qt.WindowContextHelpButtonHint)
+
+        self.create_widgets()
+        self.create_layout()
+
+    def create_widgets(self):
+        self.painter = PaintWidget(self.upliftMap, self.callback)
+
+    def create_layout(self):
+        layout = QtWidgets.QVBoxLayout(self)
+        layout.addWidget(self.painter)
 
 # Helper class to periodically run functions
 class RepeatTimer(threading.Timer):
@@ -44,12 +155,13 @@ class TerraGenesisNode(ompx.MPxNode):
     aMeshOutput       = None    # Mesh attribute: output terrain mesh
     aDoRun            = None    # Boolean attribute: whether or not the simulation is running
     aDoReset          = None    # Boolean attribute: whether or not the simulation should reset
-    
+    aDoOpenEditor     = None
 
     def __init__(self):
         super(TerraGenesisNode, self).__init__()
 
-        upliftArray = self.loadUpliftImage("C:\\Users\\Kyle Bauer\\Courses\\CIS6600\\TerraGenesis\\py\\sample_uplift.png", (128, 128))
+        # upliftArray = self.loadUpliftImage("C:\\Users\\Kyle Bauer\\Courses\\CIS6600\\TerraGenesis\\py\\sample_uplift.png", (128, 128))
+        upliftArray = np.zeros((128, 128))
         self.mModel = TerraGenesis.Simulator(upliftArray)
         self.mElevationImage = Image.fromarray(self.mModel.heightMap * 255)
         self.mRepeatTimer = RepeatTimer(0, self.testUpdate)
@@ -71,6 +183,7 @@ class TerraGenesisNode(ompx.MPxNode):
         cellSize         = dataBlock.inputValue(TerraGenesisNode.aCellSize).asFloat()
         doRun            = dataBlock.inputValue(TerraGenesisNode.aDoRun).asInt()
         doReset          = dataBlock.inputValue(TerraGenesisNode.aDoReset).asInt()
+        doOpenEditor     = dataBlock.inputValue(TerraGenesisNode.aDoOpenEditor).asInt()
 
         # Calculate grid dimensions (ensure a minimum grid of 4x4 cells)
         rows = max(int(math.ceil(gridX / cellSize)), 4)
@@ -78,13 +191,18 @@ class TerraGenesisNode(ompx.MPxNode):
         gridDims = (rows, cols)
 
         # Load the uplift image and resize it to match the grid dimensions
-        upliftArray = self.loadUpliftImage(upliftPath, gridDims)
+        #upliftArray = self.loadUpliftImage(upliftPath, gridDims)
+
+        if doOpenEditor:
+            self.showEditor()
+            cmds.setAttr(nodeName + ".doEditor", 0)
 
         # Initialize the elevation array with zeros
         elevation = np.zeros(gridDims, dtype=np.float32)
 
         if doReset:
-            upliftArray = self.loadUpliftImage("C:\\Users\\Kyle Bauer\\Courses\\CIS6600\\TerraGenesis\\py\\sample_uplift.png", (128, 128))
+            # upliftArray = self.loadUpliftImage("C:\\Users\\Kyle Bauer\\Courses\\CIS6600\\TerraGenesis\\py\\sample_uplift.png", (128, 128))
+            upliftArray = np.zeros((128, 128))
             self.mModel = TerraGenesis.Simulator(upliftArray)
             self.mElevationImage = Image.fromarray(self.mModel.heightMap * 255)
             cmds.setAttr(nodeName + ".doReset", 0)
@@ -190,6 +308,21 @@ class TerraGenesisNode(ompx.MPxNode):
 
         return meshObj
 
+    def editorCallback(self, upliftMap):
+        self.mModel.upliftMap = upliftMap
+        return
+
+    def showEditor(self):
+        try:
+            for widget in QtWidgets.QApplication.allWidgets():
+                if isinstance(widget, EditorUI):
+                    widget.close()
+        except:
+            pass
+
+        ui = EditorUI(self.mModel.upliftMap, self.editorCallback)
+        ui.show()
+
     @staticmethod
     def creator():
         return TerraGenesisNode()
@@ -259,6 +392,12 @@ class TerraGenesisNode(ompx.MPxNode):
         numAttrFn.setHidden(True)
         ompx.MPxNode.addAttribute(TerraGenesisNode.aDoReset)
 
+        # Do Open Editor attribute (Bool)
+        TerraGenesisNode.aDoOpenEditor = numAttrFn.create("doEditor", "edit", om.MFnNumericData.kInt, 0)
+        setInputAttr(numAttrFn)
+        numAttrFn.setHidden(True)
+        ompx.MPxNode.addAttribute(TerraGenesisNode.aDoOpenEditor)
+
         # Output Mesh attribute (mesh data)
         TerraGenesisNode.aMeshOutput = typeAttrFn.create("outputMesh", "out", om.MFnData.kMesh)
         setOutputAttr(typeAttrFn)
@@ -275,6 +414,7 @@ class TerraGenesisNode(ompx.MPxNode):
         ompx.MPxNode.attributeAffects(TerraGenesisNode.aCellSize, TerraGenesisNode.aMeshOutput)
         ompx.MPxNode.attributeAffects(TerraGenesisNode.aDoRun, TerraGenesisNode.aMeshOutput)
         ompx.MPxNode.attributeAffects(TerraGenesisNode.aDoReset, TerraGenesisNode.aMeshOutput)
+        ompx.MPxNode.attributeAffects(TerraGenesisNode.aDoOpenEditor, TerraGenesisNode.aMeshOutput)
 
     def testUpdate_main(self):
         self.mElevationImage = Image.fromarray(self.mModel.heightMap * 255)

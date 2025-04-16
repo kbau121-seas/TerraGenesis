@@ -1,6 +1,11 @@
 // State tracking variable
 global int $isRunning = 0;
 
+global proc openEditor(string $nodeName)
+{
+    setAttr ($nodeName + "doEditor") 1;
+}
+
 global proc start(string $nodeName)
 {
     global int $isRunning;
@@ -33,7 +38,8 @@ global proc reset(string $nodeName)
     $isRunning = 0;
 
     setAttr ($nodeName + "doRun") $isRunning;
-    
+    setAttr ($nodeName + "doReset") 1;
+
     updateControls($nodeName);
 }
 
@@ -43,11 +49,15 @@ global proc updateControls(string $nodeName)
 
 	button -e -enable (!$isRunning) btnStart;
 	button -e -enable ($isRunning) btnPause;
-	button -e -enable ($isRunning) btnReset;
 
 	setAttr -l ($isRunning) ($nodeName + "upliftFile");
     setAttr -l ($isRunning) ($nodeName + "gridSizeX");
     setAttr -l ($isRunning) ($nodeName + "gridSizeZ");
+}
+
+global proc AE_addEditorControls(string $nodeName)
+{
+    button -label "Editor" -command ("openEditor(\"" + $nodeName + "\")") btnEditor;
 }
 
 global proc AE_addSimulationControls(string $nodeName)
@@ -82,11 +92,13 @@ global proc AETerraGenesisNodeTemplate(string $nodeInfo)
 
     // Add Simulation Startup Attributes
     editorTemplate -beginLayout "Simulation" -collapse 0;
+    	editorTemplate -callCustom "AE_addEditorControls" "" $nodeName;
     	editorTemplate -callCustom "AE_addSimulationControls" "" $nodeName;
 
     	editorTemplate -addControl "upliftFile";
         editorTemplate -addControl "gridSizeX";
         editorTemplate -addControl "gridSizeZ";
+        editorTemplate -addControl "cellSize";
     editorTemplate -endLayout;
 
     // Add extra controls, groupings, or custom widgets as needed
