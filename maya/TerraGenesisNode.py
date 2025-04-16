@@ -44,7 +44,7 @@ class PaintWidget(QtWidgets.QWidget):
         self.upliftMap = (upliftMap * 255).astype(np.uint8)
         self.callback = callback
         
-        brushWidth = 7
+        brushWidth = 15
         gkern1d = signal.windows.gaussian(brushWidth, std=3).reshape(brushWidth, 1)
         self.brush = np.outer(gkern1d, gkern1d)
         self.brush = self.brush / np.max(self.brush)
@@ -66,7 +66,7 @@ class PaintWidget(QtWidgets.QWidget):
 
         if 0 <= x < image_w and 0 <= y < image_h:
             # self.points.append((x, y))
-            self.upliftMap[y:y+7, x:x+7] += (self.brush * 5).astype(np.uint8)
+            self.upliftMap[y-7:y+8, x-7:x+8] += (self.brush * 5).astype(np.uint8)
             self.callback(self.upliftMap.astype(np.float32) / 255)
             self.update()
 
