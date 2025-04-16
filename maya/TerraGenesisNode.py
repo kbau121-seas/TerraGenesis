@@ -1,10 +1,13 @@
-#import maya.api.OpenMaya as om
 import maya.OpenMaya as om
 import maya.OpenMayaMPx as ompx
 import maya.cmds as cmds
+import maya.utils
 import math
 import numpy as np
 from PIL import Image
+import threading
+
+import TerraGenesis
 
 # Utility functions for setting attribute flags
 def setInputAttr(attr):
@@ -19,38 +22,51 @@ def setOutputAttr(attr):
     attr.readable = True
     attr.writable = False
 
-class TerrainGenTask1Node(ompx.MPxNode):
+# Helper class to periodically run functions
+class RepeatTimer(threading.Timer):
+    def run(self):
+        while not self.finished.wait(self.interval):
+            self.function(*self.args, **self.kwargs)
+
+class TerraGenesisNode(ompx.MPxNode):
     # Define node name and unique ID
-    kNodeName = "TerrainGenTask1Node"
+    kNodeName = "TerraGenesisNode"
     kNodeId   = om.MTypeId(0x00082000)
 
     # Attributes
-    aUpliftPath = None    # String attribute: uplift image file path
-    aTimeStep   = None    # Float attribute: simulation time step
-    aIterations = None    # Int attribute: number of simulation iterations
-    aGridSizeX  = None    # Float attribute: physical grid size in X direction
-    aGridSizeZ  = None    # Float attribute: physical grid size in Z direction
-    aCellSize   = None    # Float attribute: size of each cell in the grid
-    aMeshOutput = None    # Mesh attribute: output terrain mesh
+    aUpliftPath       = None    # String attribute: uplift image file path
+    aTimeStep         = None    # Float attribute: simulation time step
+    aIterations       = None    # Int attribute: number of simulation iterations
+    aCurrentIteration = None    # Int attribute: number of processed simulation iterations
+    aGridSizeX        = None    # Float attribute: physical grid size in X direction
+    aGridSizeZ        = None    # Float attribute: physical grid size in Z direction
+    aCellSize         = None    # Float attribute: size of each cell in the grid
+    aMeshOutput       = None    # Mesh attribute: output terrain mesh
+    aDoRun            = None    # Boolean attribute: whether or not the simulation is running
     
 
     def __init__(self):
-        super(TerrainGenTask1Node, self).__init__()
+        super(TerraGenesisNode, self).__init__()
+
+        upliftArray = self.loadUpliftImage("C:\\Users\\Kyle Bauer\\Courses\\CIS6600\\TerraGenesis\\py\\sample_uplift.png", (128, 128))
+        self.mModel = TerraGenesis.Simulator(upliftArray)
+        self.mElevationImage = Image.fromarray(self.mModel.heightMap * 255)
+        self.mRepeatTimer = RepeatTimer(0, self.testUpdate)
 
     def compute(self, plug, dataBlock):
         # Only compute the output mesh
-        if plug != TerrainGenTask1Node.aMeshOutput and plug.parent() != TerrainGenTask1Node.aMeshOutput:
-            om.MGlobal.displayInfo("Compute function nottriggered")
+        if plug != TerraGenesisNode.aMeshOutput and plug.parent() != TerraGenesisNode.aMeshOutput:
             return
 
         # Retrieve input attribute values
-        om.MGlobal.displayInfo("Compute function triggered")
-        upliftPath = dataBlock.inputValue(TerrainGenTask1Node.aUpliftPath).asString()
-        timeStep   = dataBlock.inputValue(TerrainGenTask1Node.aTimeStep).asFloat()
-        iterations = dataBlock.inputValue(TerrainGenTask1Node.aIterations).asInt()
-        gridX      = dataBlock.inputValue(TerrainGenTask1Node.aGridSizeX).asFloat()
-        gridZ      = dataBlock.inputValue(TerrainGenTask1Node.aGridSizeZ).asFloat()
-        cellSize   = dataBlock.inputValue(TerrainGenTask1Node.aCellSize).asFloat()
+        upliftPath       = dataBlock.inputValue(TerraGenesisNode.aUpliftPath).asString()
+        timeStep         = dataBlock.inputValue(TerraGenesisNode.aTimeStep).asFloat()
+        iterations       = dataBlock.inputValue(TerraGenesisNode.aIterations).asInt()
+        currentIteration = dataBlock.inputValue(TerraGenesisNode.aCurrentIteration).asInt()
+        gridX            = dataBlock.inputValue(TerraGenesisNode.aGridSizeX).asFloat()
+        gridZ            = dataBlock.inputValue(TerraGenesisNode.aGridSizeZ).asFloat()
+        doRun            = dataBlock.inputValue(TerraGenesisNode.aDoRun).asInt()
+        cellSize         = dataBlock.inputValue(TerraGenesisNode.aCellSize).asFloat()
 
         # Calculate grid dimensions (ensure a minimum grid of 4x4 cells)
         rows = max(int(math.ceil(gridX / cellSize)), 4)
@@ -64,15 +80,20 @@ class TerrainGenTask1Node(ompx.MPxNode):
         elevation = np.zeros(gridDims, dtype=np.float32)
 
         # Run a basic simulation: for each iteration, add uplift scaled by the time step
-        for i in range(iterations):
-            elevation += upliftArray * timeStep
+        # om.MGlobal.displayInfo(f"Simulation Iteration: {currentIteration}/{iterations}")
+        if self.mElevationImage != None:
+            resizedElevationImage = self.mElevationImage.resize(gridDims, Image.BILINEAR)
+            elevation = np.array(resizedElevationImage, dtype=np.float32) / 255.0
 
-       
+        if (doRun and (not self.mRepeatTimer.is_alive() or self.mRepeatTimer.finished.is_set())):
+            self.mRepeatTimer.start()
+        elif (not doRun and (self.mRepeatTimer.is_alive() and not self.mRepeatTimer.finished.is_set())):
+            self.mRepeatTimer.cancel()
+            self.mRepeatTimer = RepeatTimer(0, self.testUpdate)
 
         # Set the computed mesh as the output
-        outHandle:om.MDataHandle = dataBlock.outputValue(TerrainGenTask1Node.aMeshOutput)
+        outHandle:om.MDataHandle = dataBlock.outputValue(TerraGenesisNode.aMeshOutput)
         meshData:om.MObject = om.MFnMeshData().create()
-        om.MGlobal.displayInfo("meshData created, type: " + str(type(meshData)))
         self.buildMesh(elevation, cellSize,meshData)
         outHandle.setMObject(meshData)
         dataBlock.setClean(plug)
@@ -84,11 +105,11 @@ class TerrainGenTask1Node(ompx.MPxNode):
         normalizes the pixel values to [0,1], and resizes it to 'dims'.
         """
         if not path:
-            om.MGlobal.displayWarning("Uplift path is empty.")
+            #om.MGlobal.displayWarning("Uplift path is empty.")
             return np.zeros(dims, dtype=np.float32)
         try:
             with Image.open(path) as img:
-                om.MGlobal.displayInfo(f"Uplift image loaded from {path}")
+                #om.MGlobal.displayInfo(f"Uplift image loaded from {path}")
                 # Convert the image to grayscale ('L' mode)
                 img = img.convert("L")
                 imgArray = np.array(img, dtype=np.float32) / 255.0
@@ -97,7 +118,7 @@ class TerrainGenTask1Node(ompx.MPxNode):
                 resizedArray = np.array(resizedImg, dtype=np.float32) / 255.0
                 return resizedArray
         except Exception as e:
-            om.MGlobal.displayWarning("Error loading uplift image: " + str(e))
+            #om.MGlobal.displayWarning("Error loading uplift image: " + str(e))
             return np.zeros(dims, dtype=np.float32)
 
     def buildMesh(self, elevation, cellSize,meshdata:om.MObject):
@@ -106,8 +127,6 @@ class TerrainGenTask1Node(ompx.MPxNode):
         The grid is centered at the origin on the XZ-plane, and each vertex's Y coordinate
         corresponds to the elevation value.
         """
-        om.MGlobal.displayInfo(f"Building mesh with dimensions: {elevation.shape}")
-        #om.MGlobal.displayInfo("meshdata type: " + str(type(meshdata)))
         rows, cols = elevation.shape
         vertices = []
         polyCounts = []
@@ -150,11 +169,6 @@ class TerrainGenTask1Node(ompx.MPxNode):
         for idx in polyConnects:
             connectsArray.append(int(idx))
         meshFn = om.MFnMesh()
-        om.MGlobal.displayInfo(f"=====: {type(pointsArray)}")
-        om.MGlobal.displayInfo(f"=====: {type(countsArray)}")
-        om.MGlobal.displayInfo(f"=====: {type(connectsArray)}")
-        om.MGlobal.displayInfo(f"=====: {type(meshdata)}")
-        om.MGlobal.displayInfo(f"=====: {om.MGlobal.apiVersion()}")
 
         numVerts = pointsArray.length()
         numPolys = countsArray.length()
@@ -169,7 +183,7 @@ class TerrainGenTask1Node(ompx.MPxNode):
 
     @staticmethod
     def creator():
-        return TerrainGenTask1Node()
+        return TerraGenesisNode()
 
     @staticmethod
     def initialize():
@@ -180,63 +194,89 @@ class TerrainGenTask1Node(ompx.MPxNode):
 
         # Uplift Path attribute (string, used as filename)
         defaultStr = strDataFn.create("")
-        TerrainGenTask1Node.aUpliftPath = typeAttrFn.create("upliftFile", "upf", om.MFnData.kString, defaultStr)
+        TerraGenesisNode.aUpliftPath = typeAttrFn.create("upliftFile", "upf", om.MFnData.kString, defaultStr)
         setInputAttr(typeAttrFn)
         typeAttrFn.usedAsFilename = True
-        ompx.MPxNode.addAttribute(TerrainGenTask1Node.aUpliftPath)
+        ompx.MPxNode.addAttribute(TerraGenesisNode.aUpliftPath)
 
         # Time Step attribute (float)
-        TerrainGenTask1Node.aTimeStep = numAttrFn.create("timeStep", "ts", om.MFnNumericData.kFloat, 0.1)
+        TerraGenesisNode.aTimeStep = numAttrFn.create("timeStep", "ts", om.MFnNumericData.kFloat, 0.1)
         setInputAttr(numAttrFn)
         numAttrFn.setMin(0.0)
-        ompx.MPxNode.addAttribute(TerrainGenTask1Node.aTimeStep)
+        ompx.MPxNode.addAttribute(TerraGenesisNode.aTimeStep)
 
         # Iterations attribute (int)
-        TerrainGenTask1Node.aIterations = numAttrFn.create("iterations", "iter", om.MFnNumericData.kInt, 10)
+        TerraGenesisNode.aIterations = numAttrFn.create("iterations", "iter", om.MFnNumericData.kInt, 10)
         setInputAttr(numAttrFn)
         numAttrFn.setMin(0)
-        ompx.MPxNode.addAttribute(TerrainGenTask1Node.aIterations)
+        ompx.MPxNode.addAttribute(TerraGenesisNode.aIterations)
+
+        # Current Iteration attribute (int) - HIDDEN
+        TerraGenesisNode.aCurrentIteration = numAttrFn.create("currentIteration", "prog", om.MFnNumericData.kInt, 0)
+        setInputAttr(numAttrFn)
+        numAttrFn.setMin(0)
+        numAttrFn.setHidden(True)
+        ompx.MPxNode.addAttribute(TerraGenesisNode.aCurrentIteration)
 
         # Grid Size X attribute (float)
-        TerrainGenTask1Node.aGridSizeX = numAttrFn.create("gridSizeX", "gsx", om.MFnNumericData.kFloat, 10.0)
+        TerraGenesisNode.aGridSizeX = numAttrFn.create("gridSizeX", "gsx", om.MFnNumericData.kFloat, 10.0)
         setInputAttr(numAttrFn)
         numAttrFn.setMin(0.0)
-        ompx.MPxNode.addAttribute(TerrainGenTask1Node.aGridSizeX)
+        ompx.MPxNode.addAttribute(TerraGenesisNode.aGridSizeX)
 
         # Grid Size Z attribute (float)
-        TerrainGenTask1Node.aGridSizeZ = numAttrFn.create("gridSizeZ", "gsz", om.MFnNumericData.kFloat, 10.0)
+        TerraGenesisNode.aGridSizeZ = numAttrFn.create("gridSizeZ", "gsz", om.MFnNumericData.kFloat, 10.0)
         setInputAttr(numAttrFn)
         numAttrFn.setMin(0.0)
-        ompx.MPxNode.addAttribute(TerrainGenTask1Node.aGridSizeZ)
+        ompx.MPxNode.addAttribute(TerraGenesisNode.aGridSizeZ)
 
         # Cell Size attribute (float)
-        TerrainGenTask1Node.aCellSize = numAttrFn.create("cellSize", "cs", om.MFnNumericData.kFloat, 0.5)
+        TerraGenesisNode.aCellSize = numAttrFn.create("cellSize", "cs", om.MFnNumericData.kFloat, 0.5)
         setInputAttr(numAttrFn)
         numAttrFn.setMin(0.001)
-        ompx.MPxNode.addAttribute(TerrainGenTask1Node.aCellSize)
+        ompx.MPxNode.addAttribute(TerraGenesisNode.aCellSize)
+
+        # Cell Size attribute (Bool)
+        TerraGenesisNode.aDoRun = numAttrFn.create("doRun", "run", om.MFnNumericData.kInt, 0)
+        setInputAttr(numAttrFn)
+        ompx.MPxNode.addAttribute(TerraGenesisNode.aDoRun)
 
         # Output Mesh attribute (mesh data)
-        TerrainGenTask1Node.aMeshOutput = typeAttrFn.create("outputMesh", "out", om.MFnData.kMesh)
+        TerraGenesisNode.aMeshOutput = typeAttrFn.create("outputMesh", "out", om.MFnData.kMesh)
         setOutputAttr(typeAttrFn)
-        ompx.MPxNode.addAttribute(TerrainGenTask1Node.aMeshOutput)
+        ompx.MPxNode.addAttribute(TerraGenesisNode.aMeshOutput)
 
         # Define attribute affects so that changes in any input update the mesh
-        ompx.MPxNode.attributeAffects(TerrainGenTask1Node.aUpliftPath, TerrainGenTask1Node.aMeshOutput)
-        ompx.MPxNode.attributeAffects(TerrainGenTask1Node.aTimeStep, TerrainGenTask1Node.aMeshOutput)
-        ompx.MPxNode.attributeAffects(TerrainGenTask1Node.aIterations, TerrainGenTask1Node.aMeshOutput)
-        ompx.MPxNode.attributeAffects(TerrainGenTask1Node.aGridSizeX, TerrainGenTask1Node.aMeshOutput)
-        ompx.MPxNode.attributeAffects(TerrainGenTask1Node.aGridSizeZ, TerrainGenTask1Node.aMeshOutput)
-        ompx.MPxNode.attributeAffects(TerrainGenTask1Node.aCellSize, TerrainGenTask1Node.aMeshOutput)
+        ompx.MPxNode.attributeAffects(TerraGenesisNode.aUpliftPath, TerraGenesisNode.aMeshOutput)
+        ompx.MPxNode.attributeAffects(TerraGenesisNode.aTimeStep, TerraGenesisNode.aMeshOutput)
+        ompx.MPxNode.attributeAffects(TerraGenesisNode.aIterations, TerraGenesisNode.aMeshOutput)
+        ompx.MPxNode.attributeAffects(TerraGenesisNode.aCurrentIteration, TerraGenesisNode.aMeshOutput)
+        ompx.MPxNode.attributeAffects(TerraGenesisNode.aGridSizeX, TerraGenesisNode.aMeshOutput)
+        ompx.MPxNode.attributeAffects(TerraGenesisNode.aGridSizeZ, TerraGenesisNode.aMeshOutput)
+        ompx.MPxNode.attributeAffects(TerraGenesisNode.aCellSize, TerraGenesisNode.aMeshOutput)
+        ompx.MPxNode.attributeAffects(TerraGenesisNode.aDoRun, TerraGenesisNode.aMeshOutput)
+
+    def testUpdate_main(self):
+        self.mElevationImage = Image.fromarray(self.mModel.heightMap * 255)
+
+        nodeName = "TerraGenesisNode"
+        currentIteration = cmds.getAttr(nodeName + ".currentIteration")
+        cmds.setAttr(nodeName + ".currentIteration", currentIteration + 1)
+
+    def testUpdate(self):
+        self.mModel.run(1)
+
+        maya.utils.executeInMainThreadWithResult(self.testUpdate_main)
 
 def create_terrain_node():
     """
-    Helper function to create an instance of the TerrainGenTask1Node in the scene.
+    Helper function to create an instance of the TerraGenesisNode in the scene.
     If a node with the same name exists, it is deleted first.
     """
-    nodeName = "myTerrainNode"
+    nodeName = "TerraGenesisNode"
     if cmds.objExists(nodeName):
         cmds.delete(nodeName)
-    newNode = cmds.createNode(TerrainGenTask1Node.kNodeName, name=nodeName)
+    newNode = cmds.createNode(TerraGenesisNode.kNodeName, name=nodeName)
     om.MGlobal.displayInfo("Created node: " + newNode)
     transformName = cmds.createNode("transform", name="terrainTransform#")
     meshShape = cmds.createNode("mesh", parent=transformName, name="terrainMesh#")
@@ -256,20 +296,19 @@ def initializePlugin(mObject):
     om.MGlobal.displayInfo("Created node: ")
     plugin = ompx.MFnPlugin(mObject, "MyCompany", "1.0", "Any")
     try:
-        plugin.registerNode(TerrainGenTask1Node.kNodeName,
-                              TerrainGenTask1Node.kNodeId,
-                              TerrainGenTask1Node.creator,
-                              TerrainGenTask1Node.initialize,
+        plugin.registerNode(TerraGenesisNode.kNodeName,
+                              TerraGenesisNode.kNodeId,
+                              TerraGenesisNode.creator,
+                              TerraGenesisNode.initialize,
                               ompx.MPxNode.kDependNode)
     except Exception as e:
         om.MGlobal.displayError("Error registering node: " + str(e))
+
     create_terrain_node()
 
 def uninitializePlugin(mObject):
     plugin = ompx.MFnPlugin(mObject)
     try:
-        plugin.deregisterNode(TerrainGenTask1Node.kNodeId)
+        plugin.deregisterNode(TerraGenesisNode.kNodeId)
     except Exception as e:
         om.MGlobal.displayError("Error deregistering node: " + str(e))
-
-

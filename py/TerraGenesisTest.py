@@ -6,7 +6,8 @@ if __name__ == "__main__":
 	ITERATIONS=1000
 	sim = Simulator()
 
-	cv2.imwrite("sample_uplift.png", cv2.resize(sim.upliftMap * 255, (720, 720), interpolation=cv2.INTER_NEAREST))
+	cv2.imwrite("sample_uplift.png", sim.upliftMap * 255)
+	#cv2.imwrite("sample_uplift.png", cv2.resize(sim.upliftMap * 255, (720, 720), interpolation=cv2.INTER_NEAREST))
 
 	for i in range(ITERATIONS):
 		start = time.time()
