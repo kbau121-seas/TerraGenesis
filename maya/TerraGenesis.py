@@ -60,7 +60,7 @@ class Simulator:
 
 		# Calculate the unnormalized weights
 		higher_neighbors = self.heightMap[..., np.newaxis] < weights
-		weights = np.pow((weights - self.heightMap[..., np.newaxis]) / np.reshape(self.OFFSET_DIST, (1, 1, 8)), 4)
+		weights = np.power((weights - self.heightMap[..., np.newaxis]) / np.reshape(self.OFFSET_DIST, (1, 1, 8)), 4)
 		weights[higher_neighbors] = 0
 
 		# Normalize the weights
@@ -100,7 +100,7 @@ class Simulator:
 			steepestSlopeMap = self.getSteepestSlopeMap()
 			drainageAreaMap = self.getDrainageAreaMap()
 
-			erosion = np.pow(steepestSlopeMap, self.steepestSlopeDegree) * np.pow(drainageAreaMap, self.drainageDegree)
+			erosion = np.power(steepestSlopeMap, self.steepestSlopeDegree) * np.power(drainageAreaMap, self.drainageDegree)
 
 			deltaHeight  = self.upliftMap * self.upliftScale
 			deltaHeight -= erosion * self.erosionScale

@@ -312,16 +312,30 @@ class TerraGenesisNode(ompx.MPxNode):
         self.mModel.upliftMap = upliftMap
         return
 
-    def showEditor(self):
-        try:
-            for widget in QtWidgets.QApplication.allWidgets():
-                if isinstance(widget, EditorUI):
-                    widget.close()
-        except:
-            pass
+    # def showEditor(self):
+    #     try:
+    #         for widget in QtWidgets.QApplication.allWidgets():
+    #             if isinstance(widget, EditorUI):
+    #                 widget.close()
+    #     except:
+    #         pass
 
-        ui = EditorUI(self.mModel.upliftMap, self.editorCallback)
-        ui.show()
+    #     ui = EditorUI(self.mModel.upliftMap, self.editorCallback)
+    #     ui.show()
+
+    def showEditor(self):
+        def _show_ui():
+            try:
+                for widget in QtWidgets.QApplication.allWidgets():
+                    if isinstance(widget, EditorUI):
+                        widget.close()
+            except:
+                pass
+
+            self.ui = EditorUI(self.mModel.upliftMap, self.editorCallback)
+            self.ui.show()
+
+        maya.utils.executeDeferred(_show_ui)
 
     @staticmethod
     def creator():
