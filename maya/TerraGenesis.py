@@ -101,6 +101,7 @@ class Simulator:
 			drainageAreaMap = self.getDrainageAreaMap()
 
 			erosion = np.power(steepestSlopeMap, self.steepestSlopeDegree) * np.power(drainageAreaMap, self.drainageDegree)
+			self.erosion=erosion
 
 			deltaHeight  = self.upliftMap * self.upliftScale
 			deltaHeight -= erosion * self.erosionScale

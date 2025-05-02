@@ -165,6 +165,7 @@ class TerraGenesisNode(ompx.MPxNode):
         self.mModel = TerraGenesis.Simulator(upliftArray)
         self.mElevationImage = Image.fromarray(self.mModel.heightMap * 255)
         self.mRepeatTimer = RepeatTimer(0, self.testUpdate)
+        self.mErosion = np.zeros((128, 128), dtype=np.float32)
 
     def compute(self, plug, dataBlock):
         # Only compute the output mesh
@@ -205,6 +206,7 @@ class TerraGenesisNode(ompx.MPxNode):
             upliftArray = np.zeros((128, 128))
             self.mModel = TerraGenesis.Simulator(upliftArray)
             self.mElevationImage = Image.fromarray(self.mModel.heightMap * 255)
+            self.mErosion=np.zeros_like(self.mModel.heightMap)
             cmds.setAttr(nodeName + ".doReset", 0)
 
         # Run a basic simulation: for each iteration, add uplift scaled by the time step
@@ -301,6 +303,32 @@ class TerraGenesisNode(ompx.MPxNode):
         numPolys = countsArray.length()
 
         meshObj = meshFn.create(numVerts, numPolys, pointsArray, countsArray, connectsArray, meshdata)
+        wetlandColor = np.array([76.0, 187.0, 23.0]) / 255.0
+        peak = np.array([1.0,   1.0,   1.0])
+        vertexColors = om.MColorArray()
+
+        erosion_normalized = (self.mErosion - np.min(self.mErosion)) / (np.max(self.mErosion) - np.min(self.mErosion) + 1e-6)
+        max_h = float(np.max(elevation)) if np.max(elevation) > 0 else 1.0
+        for i in range(rows):
+            for j in range(cols):
+                e = float(erosion_normalized[i, j])
+                h = float(elevation[i, j]) / max_h 
+                baseColor = (1.0 - h) * wetlandColor + h * peak
+                base_r, base_g, base_b = baseColor
+
+            
+                r = (1.0 - e) * base_r + e * 0.0
+                g = (1.0 - e) * base_g + e * 0.0
+                b = (1.0 - e) * base_b + e * 1.0
+                color = om.MColor(r,g,b, 1.0)  
+                vertexColors.append(color)
+
+        indices = om.MIntArray()
+        for idx in range(numVerts):
+            indices.append(idx)
+
+
+        meshFn.setVertexColors(vertexColors, indices)
 
        
 
@@ -432,7 +460,7 @@ class TerraGenesisNode(ompx.MPxNode):
 
     def testUpdate_main(self):
         self.mElevationImage = Image.fromarray(self.mModel.heightMap * 255)
-
+        self.mErosion=self.mModel.erosion
         nodeName = "TerraGenesisNode"
         currentIteration = cmds.getAttr(nodeName + ".currentIteration")
         cmds.setAttr(nodeName + ".currentIteration", currentIteration + 1)
