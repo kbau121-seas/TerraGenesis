@@ -156,7 +156,7 @@ class TerraGenesisNode(ompx.MPxNode):
     aDoRun            = None    # Boolean attribute: whether or not the simulation is running
     aDoReset          = None    # Boolean attribute: whether or not the simulation should reset
     aDoOpenEditor     = None
-
+    aMode             = None
     def __init__(self):
         super(TerraGenesisNode, self).__init__()
 
@@ -185,6 +185,9 @@ class TerraGenesisNode(ompx.MPxNode):
         doRun            = dataBlock.inputValue(TerraGenesisNode.aDoRun).asInt()
         doReset          = dataBlock.inputValue(TerraGenesisNode.aDoReset).asInt()
         doOpenEditor     = dataBlock.inputValue(TerraGenesisNode.aDoOpenEditor).asInt()
+        modeVal          = dataBlock.inputValue(TerraGenesisNode.aMode).asShort()
+
+        self.mode = modeVal
 
         # Calculate grid dimensions (ensure a minimum grid of 4x4 cells)
         rows = max(int(math.ceil(gridX / cellSize)), 4)
@@ -305,6 +308,9 @@ class TerraGenesisNode(ompx.MPxNode):
         meshObj = meshFn.create(numVerts, numPolys, pointsArray, countsArray, connectsArray, meshdata)
         wetlandColor = np.array([76.0, 187.0, 23.0]) / 255.0
         peak = np.array([1.0,   1.0,   1.0])
+        blackGrey = np.array([0.1, 0.1, 0.1])    
+        whiteGrey = np.array([0.4, 0.4, 0.4])    
+
         vertexColors = om.MColorArray()
 
         erosion_normalized = (self.mErosion - np.min(self.mErosion)) / (np.max(self.mErosion) - np.min(self.mErosion) + 1e-6)
@@ -313,13 +319,22 @@ class TerraGenesisNode(ompx.MPxNode):
             for j in range(cols):
                 e = float(erosion_normalized[i, j])
                 h = float(elevation[i, j]) / max_h 
-                baseColor = (1.0 - h) * wetlandColor + h * peak
-                base_r, base_g, base_b = baseColor
-
-            
-                r = (1.0 - e) * base_r + e * 0.0
-                g = (1.0 - e) * base_g + e * 0.0
-                b = (1.0 - e) * base_b + e * 1.0
+                if self.mode==0:
+                    baseColor = (1.0 - h) * wetlandColor + h * peak
+                    base_r, base_g, base_b = baseColor
+                    r = (1.0 - e) * base_r + e * 0.0
+                    g = (1.0 - e) * base_g + e * 0.0
+                    b = (1.0 - e) * base_b + e * 1.0
+                else:
+                    baseColor = (h) * whiteGrey + (1.0-h) * blackGrey
+                    base_r, base_g, base_b = baseColor
+                
+                    e_vis = e ** 0.5  
+                    magmaColor = np.array([0.9, 0.4, 0.1])
+                    r = (1.0 - e_vis) * base_r + e_vis * magmaColor[0]
+                    g = (1.0 - e_vis) * base_g + e_vis * magmaColor[1]
+                    b = (1.0 - e_vis) * base_b + e_vis * magmaColor[2]
+           
                 color = om.MColor(r,g,b, 1.0)  
                 vertexColors.append(color)
 
@@ -375,7 +390,7 @@ class TerraGenesisNode(ompx.MPxNode):
         numAttrFn = om.MFnNumericAttribute()
         typeAttrFn = om.MFnTypedAttribute()
         strDataFn = om.MFnStringData()
-
+        eAttr = om.MFnEnumAttribute() 
         # Uplift Path attribute (string, used as filename)
         defaultStr = strDataFn.create("")
         TerraGenesisNode.aUpliftPath = typeAttrFn.create("upliftFile", "upf", om.MFnData.kString, defaultStr)
@@ -446,6 +461,13 @@ class TerraGenesisNode(ompx.MPxNode):
         typeAttrFn.setHidden(True)
         ompx.MPxNode.addAttribute(TerraGenesisNode.aMeshOutput)
 
+
+        TerraGenesisNode.aMode = eAttr.create("mode", "md", 0)
+        eAttr.addField("Normal", 0)
+        eAttr.addField("Volcano", 1)
+        setInputAttr(eAttr)                        
+        ompx.MPxNode.addAttribute(TerraGenesisNode.aMode)
+
         # Define attribute affects so that changes in any input update the mesh
         ompx.MPxNode.attributeAffects(TerraGenesisNode.aUpliftPath, TerraGenesisNode.aMeshOutput)
         ompx.MPxNode.attributeAffects(TerraGenesisNode.aTimeStep, TerraGenesisNode.aMeshOutput)
@@ -457,6 +479,8 @@ class TerraGenesisNode(ompx.MPxNode):
         ompx.MPxNode.attributeAffects(TerraGenesisNode.aDoRun, TerraGenesisNode.aMeshOutput)
         ompx.MPxNode.attributeAffects(TerraGenesisNode.aDoReset, TerraGenesisNode.aMeshOutput)
         ompx.MPxNode.attributeAffects(TerraGenesisNode.aDoOpenEditor, TerraGenesisNode.aMeshOutput)
+        ompx.MPxNode.attributeAffects(TerraGenesisNode.aMode, TerraGenesisNode.aMeshOutput)
+
 
     def testUpdate_main(self):
         self.mElevationImage = Image.fromarray(self.mModel.heightMap * 255)

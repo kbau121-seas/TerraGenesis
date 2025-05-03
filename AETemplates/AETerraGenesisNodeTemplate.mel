@@ -92,9 +92,10 @@ global proc AETerraGenesisNodeTemplate(string $nodeInfo)
 
     // Add Simulation Startup Attributes
     editorTemplate -beginLayout "Simulation" -collapse 0;
+        
     	editorTemplate -callCustom "AE_addEditorControls" "" $nodeName;
     	editorTemplate -callCustom "AE_addSimulationControls" "" $nodeName;
-
+        editorTemplate -addControl -label "Render Mode" "mode";
     	editorTemplate -addControl "upliftFile";
         editorTemplate -addControl "gridSizeX";
         editorTemplate -addControl "gridSizeZ";
