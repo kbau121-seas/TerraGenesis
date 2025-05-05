@@ -13,6 +13,7 @@ from shiboken2 import wrapInstance
 import maya.OpenMayaUI as omui
 
 from scipy import signal
+from scipy.ndimage import gaussian_filter
 
 import TerraGenesis
 
@@ -33,21 +34,74 @@ def get_maya_main_window():
     main_window_ptr = omui.MQtUtil.mainWindow()
     return wrapInstance(int(main_window_ptr), QtWidgets.QMainWindow)
 
+class ViewWidget(QtWidgets.QWidget):
+    def __init__(self, heightMap, parent=None):
+        super(ViewWidget, self).__init__(parent)
+
+        self.set_heightMap(heightMap, doUpdate=False)
+
+        self.setSizePolicy(QtWidgets.QSizePolicy.Expanding, QtWidgets.QSizePolicy.Expanding)
+
+    def paintEvent(self, event):
+        painter = QtGui.QPainter(self)
+        painter.setRenderHint(QtGui.QPainter.SmoothPixmapTransform)
+        painter.fillRect(self.rect(), QtGui.QColor("#1e1e1e"))
+
+        if self.heightMap is not None:
+            image_h, image_w = self.heightMap.shape
+            widget_w, widget_h = self.width(), self.height()
+
+            # Scaling
+            scale = min(widget_w / image_w, widget_h / image_h)
+
+            # Centering offset
+            offset_x = (widget_w - (image_w * scale)) / 2
+            offset_y = (widget_h - (image_h * scale)) / 2
+
+            # Create QImage
+            qimage = QtGui.QImage(
+                self.heightMap.data, image_w, image_h, image_w,
+                QtGui.QImage.Format_Grayscale8
+            )
+
+            pixmap = QtGui.QPixmap.fromImage(qimage).scaled(
+                image_w * scale, image_h * scale,
+                QtCore.Qt.KeepAspectRatio, QtCore.Qt.SmoothTransformation
+            )
+            painter.drawPixmap(offset_x, offset_y, pixmap)
+
+        painter.end()
+
+    def set_heightMap(self, heightMap, doUpdate=True):
+        self.setMinimumHeight(heightMap.shape[0])
+        self.setMinimumWidth(heightMap.shape[1])
+
+        self.heightMap = (heightMap * 255).astype(np.uint8)
+
+        if doUpdate:
+            self.update()
+
 class PaintWidget(QtWidgets.QWidget):
     def __init__(self, upliftMap, callback, parent=None):
         super(PaintWidget, self).__init__(parent)
-        self.setMinimumHeight(upliftMap.shape[0])
-        self.setMinimumWidth(upliftMap.shape[1])
+
+        self.set_upliftMap(upliftMap, doUpdate=False)
+
         self.setSizePolicy(QtWidgets.QSizePolicy.Expanding, QtWidgets.QSizePolicy.Expanding)
 
-        self.points = []
-        self.upliftMap = (upliftMap * 255).astype(np.uint8)
         self.callback = callback
-        
-        brushWidth = 15
-        gkern1d = signal.windows.gaussian(brushWidth, std=3).reshape(brushWidth, 1)
-        self.brush = np.outer(gkern1d, gkern1d)
-        self.brush = self.brush / np.max(self.brush)
+
+        self.hardness = 50
+        self.strength = 50
+
+    def set_upliftMap(self, upliftMap, doUpdate=True):
+        self.setMinimumHeight(upliftMap.shape[0])
+        self.setMinimumWidth(upliftMap.shape[1])
+
+        self.upliftMap = (upliftMap * 255).astype(np.uint8)
+
+        if doUpdate:
+            self.update()
 
     def mouseMoveEvent(self, event):
         image_h, image_w = self.upliftMap.shape
@@ -64,9 +118,27 @@ class PaintWidget(QtWidgets.QWidget):
         x = int((event.x() - offset_x) / scale)
         y = int((event.y() - offset_y) / scale)
 
+        sign = 0
+        if event.buttons() & Qt.LeftButton:
+            sign = 1
+        elif event.buttons() & Qt.RightButton:
+            sign = -1
+        else:
+            return
+
         if 0 <= x < image_w and 0 <= y < image_h:
-            # self.points.append((x, y))
-            self.upliftMap[y-7:y+8, x-7:x+8] += (self.brush * 5).astype(np.uint8)
+            deltaMap = np.zeros_like(self.upliftMap).astype(np.int32)
+
+            sigma = ((self.hardness / 100) ** 2) * 20
+            strength = ((self.strength / 100) ** 2) * 2000 * sigma
+
+            deltaMap[y, x] += strength * sign
+            deltaMap = gaussian_filter(deltaMap, sigma=sigma).astype(np.int32)
+
+            self.outMap = self.upliftMap.astype(np.int32) + deltaMap
+            self.outMap = self.outMap.clip(0, 255)
+            self.upliftMap = self.outMap.astype(np.uint8)
+
             self.callback(self.upliftMap.astype(np.float32) / 255)
             self.update()
 
@@ -98,25 +170,14 @@ class PaintWidget(QtWidgets.QWidget):
             )
             painter.drawPixmap(offset_x, offset_y, pixmap)
 
-            # Draw Points
-            point_radius = 4
-            pen = QtGui.QPen(QtCore.Qt.green)
-            brush = QtGui.QBrush(QtCore.Qt.green)
-            painter.setPen(pen)
-            painter.setBrush(brush)
-
-            for x, y in self.points:
-                px = x * scale + offset_x
-                py = y * scale + offset_y
-                painter.drawEllipse(QtCore.QPointF(px, py), point_radius, point_radius)
-
         painter.end()
 
 class EditorUI(QtWidgets.QDialog):
-    def __init__(self, upliftMap, callback, parent=get_maya_main_window()):
+    def __init__(self, upliftMap, callback, heightMap, parent=get_maya_main_window()):
         super(EditorUI, self).__init__(parent)
 
         self.upliftMap = upliftMap
+        self.heightMap = heightMap
         self.callback = callback
 
         self.setWindowTitle("Parameter Editor")
@@ -126,12 +187,54 @@ class EditorUI(QtWidgets.QDialog):
         self.create_widgets()
         self.create_layout()
 
+    def updateStrength(self, value):
+        self.painter.strength = value
+
+    def updateHardness(self, value):
+        self.painter.hardness = value
+
     def create_widgets(self):
         self.painter = PaintWidget(self.upliftMap, self.callback)
+
+        self.strengthLabel = QtWidgets.QLabel("Strength")
+        self.strengthSlider = QtWidgets.QSlider(Qt.Horizontal)
+        self.strengthSlider.setRange(1, 100)
+        self.strengthSlider.valueChanged.connect(self.updateStrength)
+        self.strengthSlider.setValue(50)
+
+        self.hardnessLabel = QtWidgets.QLabel("Spread")
+        self.hardnessSlider = QtWidgets.QSlider(Qt.Horizontal)
+        self.hardnessSlider.setRange(1, 100)
+        self.hardnessSlider.valueChanged.connect(self.updateHardness)
+        self.hardnessSlider.setValue(50)
+
+        self.view = ViewWidget(self.heightMap)
 
     def create_layout(self):
         layout = QtWidgets.QVBoxLayout(self)
         layout.addWidget(self.painter)
+
+        optionsLayout = QtWidgets.QGridLayout()
+        optionsLayout.addWidget(self.strengthLabel, 0, 0)
+        optionsLayout.addWidget(self.strengthSlider, 0, 1)
+        optionsLayout.addWidget(self.hardnessLabel, 1, 0)
+        optionsLayout.addWidget(self.hardnessSlider, 1, 1)
+
+        layout.addLayout(optionsLayout)
+
+        layout.addWidget(self.view)
+
+    def set_upliftMap(self, upliftMap):
+        self.upliftMap = upliftMap
+
+        if (self.painter is not None):
+            self.painter.set_upliftMap(upliftMap)
+
+    def set_heightMap(self, heightMap):
+        self.heightMap = heightMap
+
+        if (self.view is not None):
+            self.view.set_heightMap(heightMap)
 
 # Helper class to periodically run functions
 class RepeatTimer(threading.Timer):
@@ -211,6 +314,9 @@ class TerraGenesisNode(ompx.MPxNode):
             self.mElevationImage = Image.fromarray(self.mModel.heightMap * 255)
             self.mErosion=np.zeros_like(self.mModel.heightMap)
             cmds.setAttr(nodeName + ".doReset", 0)
+
+            if (self.ui is not None):
+                self.ui.set_upliftMap(upliftArray)
 
         # Run a basic simulation: for each iteration, add uplift scaled by the time step
         if self.mElevationImage != None:
@@ -375,7 +481,7 @@ class TerraGenesisNode(ompx.MPxNode):
             except:
                 pass
 
-            self.ui = EditorUI(self.mModel.upliftMap, self.editorCallback)
+            self.ui = EditorUI(self.mModel.upliftMap, self.editorCallback, self.mModel.heightMap)
             self.ui.show()
 
         maya.utils.executeDeferred(_show_ui)
@@ -484,10 +590,13 @@ class TerraGenesisNode(ompx.MPxNode):
 
     def testUpdate_main(self):
         self.mElevationImage = Image.fromarray(self.mModel.heightMap * 255)
-        self.mErosion=self.mModel.erosion
+        #self.mErosion=self.mModel.erosion
         nodeName = "TerraGenesisNode"
         currentIteration = cmds.getAttr(nodeName + ".currentIteration")
         cmds.setAttr(nodeName + ".currentIteration", currentIteration + 1)
+
+        if self.ui is not None:
+            self.ui.set_heightMap(self.mModel.heightMap)
 
     def testUpdate(self):
         self.mModel.run(1)

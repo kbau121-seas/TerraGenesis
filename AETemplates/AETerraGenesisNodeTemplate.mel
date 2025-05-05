@@ -34,7 +34,6 @@ global proc reset(string $nodeName)
 {
 	global int $isRunning;
 
-    if (!$isRunning) return;
     $isRunning = 0;
 
     setAttr ($nodeName + "doRun") $isRunning;
@@ -97,8 +96,8 @@ global proc AETerraGenesisNodeTemplate(string $nodeInfo)
     	editorTemplate -callCustom "AE_addSimulationControls" "" $nodeName;
         editorTemplate -addControl -label "Render Mode" "mode";
     	editorTemplate -addControl "upliftFile";
-        editorTemplate -addControl "gridSizeX";
-        editorTemplate -addControl "gridSizeZ";
+        //editorTemplate -addControl "gridSizeX";
+        //editorTemplate -addControl "gridSizeZ";
         editorTemplate -addControl "cellSize";
     editorTemplate -endLayout;
 
