@@ -21,10 +21,10 @@ class Simulator:
 		self.timeScale = 1
 
 		self.upliftScale = 0.01
-		self.erosionScale = 0.1
+		self.erosionScale = np.full(upliftMap.shape, 0.1)
 
-		self.steepestSlopeDegree = 2
-		self.drainageDegree = 1
+		self.steepestSlopeDegree = np.full(upliftMap.shape, 2)
+		self.drainageDegree = np.full(upliftMap.shape, 1)
 
 		self.upliftMap = upliftMap
 		self.heightMap = upliftMap
