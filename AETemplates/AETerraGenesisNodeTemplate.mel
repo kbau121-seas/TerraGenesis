@@ -98,7 +98,9 @@ global proc AETerraGenesisNodeTemplate(string $nodeInfo)
     	editorTemplate -addControl "upliftFile";
         //editorTemplate -addControl "gridSizeX";
         //editorTemplate -addControl "gridSizeZ";
-        editorTemplate -addControl "cellSize";
+        //editorTemplate -addControl "cellSize";
+        editorTemplate -addControl "simulationResolution";
+        editorTemplate -addControl "outputResolution";
     editorTemplate -endLayout;
 
     // Add extra controls, groupings, or custom widgets as needed

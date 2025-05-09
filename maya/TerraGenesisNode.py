@@ -256,18 +256,20 @@ class TerraGenesisNode(ompx.MPxNode):
     kNodeId   = om.MTypeId(0x00082000)
 
     # Attributes
-    aUpliftPath       = None    # String attribute: uplift image file path
-    aTimeStep         = None    # Float attribute: simulation time step
-    aIterations       = None    # Int attribute: number of simulation iterations
-    aCurrentIteration = None    # Int attribute: number of processed simulation iterations
-    aGridSizeX        = None    # Float attribute: physical grid size in X direction
-    aGridSizeZ        = None    # Float attribute: physical grid size in Z direction
-    aCellSize         = None    # Float attribute: size of each cell in the grid
-    aMeshOutput       = None    # Mesh attribute: output terrain mesh
-    aDoRun            = None    # Boolean attribute: whether or not the simulation is running
-    aDoReset          = None    # Boolean attribute: whether or not the simulation should reset
-    aDoOpenEditor     = None
-    aMode             = None
+    aUpliftPath           = None    # String attribute: uplift image file path
+    aTimeStep             = None    # Float attribute: simulation time step
+    aIterations           = None    # Int attribute: number of simulation iterations
+    aCurrentIteration     = None    # Int attribute: number of processed simulation iterations
+    aGridSizeX            = None    # Float attribute: physical grid size in X direction
+    aGridSizeZ            = None    # Float attribute: physical grid size in Z direction
+    aCellSize             = None    # Float attribute: size of each cell in the grid
+    aSimulationResolution = None
+    aOutputResolution     = None
+    aMeshOutput           = None    # Mesh attribute: output terrain mesh
+    aDoRun                = None    # Boolean attribute: whether or not the simulation is running
+    aDoReset              = None    # Boolean attribute: whether or not the simulation should reset
+    aDoOpenEditor         = None
+    aMode                 = None
     def __init__(self):
         super(TerraGenesisNode, self).__init__()
 
@@ -284,6 +286,8 @@ class TerraGenesisNode(ompx.MPxNode):
         self.minDrainageDegree = 0
         self.maxDrainageDegree = 2
 
+        self.ui = None
+
     def compute(self, plug, dataBlock):
         # Only compute the output mesh
         if plug != TerraGenesisNode.aMeshOutput and plug.parent() != TerraGenesisNode.aMeshOutput:
@@ -292,25 +296,30 @@ class TerraGenesisNode(ompx.MPxNode):
         nodeName = "TerraGenesisNode"
 
         # Retrieve input attribute values
-        upliftPath       = dataBlock.inputValue(TerraGenesisNode.aUpliftPath).asString()
-        timeStep         = dataBlock.inputValue(TerraGenesisNode.aTimeStep).asFloat()
-        iterations       = dataBlock.inputValue(TerraGenesisNode.aIterations).asInt()
-        currentIteration = dataBlock.inputValue(TerraGenesisNode.aCurrentIteration).asInt()
-        gridX            = dataBlock.inputValue(TerraGenesisNode.aGridSizeX).asFloat()
-        gridZ            = dataBlock.inputValue(TerraGenesisNode.aGridSizeZ).asFloat()
-        cellSize         = dataBlock.inputValue(TerraGenesisNode.aCellSize).asFloat()
-        doRun            = dataBlock.inputValue(TerraGenesisNode.aDoRun).asInt()
-        doReset          = dataBlock.inputValue(TerraGenesisNode.aDoReset).asInt()
-        doOpenEditor     = dataBlock.inputValue(TerraGenesisNode.aDoOpenEditor).asInt()
-        modeVal          = dataBlock.inputValue(TerraGenesisNode.aMode).asShort()
+        upliftPath           = dataBlock.inputValue(TerraGenesisNode.aUpliftPath).asString()
+        timeStep             = dataBlock.inputValue(TerraGenesisNode.aTimeStep).asFloat()
+        iterations           = dataBlock.inputValue(TerraGenesisNode.aIterations).asInt()
+        currentIteration     = dataBlock.inputValue(TerraGenesisNode.aCurrentIteration).asInt()
+        gridX                = dataBlock.inputValue(TerraGenesisNode.aGridSizeX).asFloat()
+        gridZ                = dataBlock.inputValue(TerraGenesisNode.aGridSizeZ).asFloat()
+        # cellSize           = dataBlock.inputValue(TerraGenesisNode.aCellSize).asFloat()
+        simulationResolution = dataBlock.inputValue(TerraGenesisNode.aSimulationResolution).asInt()
+        outputResolution     = dataBlock.inputValue(TerraGenesisNode.aOutputResolution).asInt()
+        doRun                = dataBlock.inputValue(TerraGenesisNode.aDoRun).asInt()
+        doReset              = dataBlock.inputValue(TerraGenesisNode.aDoReset).asInt()
+        doOpenEditor         = dataBlock.inputValue(TerraGenesisNode.aDoOpenEditor).asInt()
+        modeVal              = dataBlock.inputValue(TerraGenesisNode.aMode).asShort()
 
         self.mode = modeVal
         self.isRunning = doRun
 
+        if (self.mModel.dim != (simulationResolution, simulationResolution) and (not self.mRepeatTimer.is_alive() or self.mRepeatTimer.finished.is_set())):
+            self.mModel.setSimulationResolution(simulationResolution)
+            self.mErosion = self.mModel.erosion
+
         # Calculate grid dimensions (ensure a minimum grid of 4x4 cells)
-        rows = max(int(math.ceil(gridX / cellSize)), 4)
-        cols = max(int(math.ceil(gridZ / cellSize)), 4)
-        gridDims = (rows, cols)
+        cellSize = gridX / (outputResolution - 1)
+        gridDims = (outputResolution, outputResolution)
 
         # Load the uplift image and resize it to match the grid dimensions
         #upliftArray = self.loadUpliftImage(upliftPath, gridDims)
@@ -324,7 +333,7 @@ class TerraGenesisNode(ompx.MPxNode):
 
         if doReset:
             # upliftArray = self.loadUpliftImage("C:\\Users\\Kyle Bauer\\Courses\\CIS6600\\TerraGenesis\\py\\sample_uplift.png", (128, 128))
-            upliftArray = np.zeros((128, 128))
+            upliftArray = np.zeros((simulationResolution, simulationResolution))
             self.mModel = TerraGenesis.Simulator(upliftArray)
             self.mElevationImage = Image.fromarray(self.mModel.heightMap * 255)
             self.mErosion=np.zeros_like(self.mModel.heightMap)
@@ -347,7 +356,7 @@ class TerraGenesisNode(ompx.MPxNode):
         # Set the computed mesh as the output
         outHandle:om.MDataHandle = dataBlock.outputValue(TerraGenesisNode.aMeshOutput)
         meshData:om.MObject = om.MFnMeshData().create()
-        self.buildMesh(elevation, cellSize,meshData)
+        self.buildMesh(elevation, cellSize, meshData)
         outHandle.setMObject(meshData)
         dataBlock.setClean(plug)
         
@@ -508,7 +517,7 @@ class TerraGenesisNode(ompx.MPxNode):
         return self.mModel.heightMap
 
     def setHeight_EDITOR(self, value):
-        self.mModel = value
+        self.mModel.heightMap = value
 
         self.ui.onHeightChanged()
 
@@ -589,6 +598,16 @@ class TerraGenesisNode(ompx.MPxNode):
         numAttrFn.setMin(0.001)
         ompx.MPxNode.addAttribute(TerraGenesisNode.aCellSize)
 
+        TerraGenesisNode.aSimulationResolution = numAttrFn.create("simulationResolution", "sres", om.MFnNumericData.kInt, 128)
+        setInputAttr(numAttrFn)
+        numAttrFn.setMin(0)
+        ompx.MPxNode.addAttribute(TerraGenesisNode.aSimulationResolution)
+
+        TerraGenesisNode.aOutputResolution = numAttrFn.create("outputResolution", "ores", om.MFnNumericData.kInt, 10)
+        setInputAttr(numAttrFn)
+        numAttrFn.setMin(0)
+        ompx.MPxNode.addAttribute(TerraGenesisNode.aOutputResolution)
+
         # Is Running attribute (Bool)
         TerraGenesisNode.aDoRun = numAttrFn.create("doRun", "run", om.MFnNumericData.kInt, 0)
         setInputAttr(numAttrFn)
@@ -628,6 +647,8 @@ class TerraGenesisNode(ompx.MPxNode):
         ompx.MPxNode.attributeAffects(TerraGenesisNode.aGridSizeX, TerraGenesisNode.aMeshOutput)
         ompx.MPxNode.attributeAffects(TerraGenesisNode.aGridSizeZ, TerraGenesisNode.aMeshOutput)
         ompx.MPxNode.attributeAffects(TerraGenesisNode.aCellSize, TerraGenesisNode.aMeshOutput)
+        ompx.MPxNode.attributeAffects(TerraGenesisNode.aSimulationResolution, TerraGenesisNode.aMeshOutput)
+        ompx.MPxNode.attributeAffects(TerraGenesisNode.aOutputResolution, TerraGenesisNode.aMeshOutput)
         ompx.MPxNode.attributeAffects(TerraGenesisNode.aDoRun, TerraGenesisNode.aMeshOutput)
         ompx.MPxNode.attributeAffects(TerraGenesisNode.aDoReset, TerraGenesisNode.aMeshOutput)
         ompx.MPxNode.attributeAffects(TerraGenesisNode.aDoOpenEditor, TerraGenesisNode.aMeshOutput)

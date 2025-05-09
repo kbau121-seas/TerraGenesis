@@ -1,4 +1,5 @@
 import numpy as np
+from PIL import Image
 
 class Simulator:
 	OFFSETS = np.array([
@@ -26,8 +27,41 @@ class Simulator:
 		self.steepestSlopeDegree = np.full(upliftMap.shape, 2)
 		self.drainageDegree = np.full(upliftMap.shape, 1)
 
+		self.erosion = np.zeros_like(upliftMap)
 		self.upliftMap = upliftMap
 		self.heightMap = upliftMap
+
+	def setSimulationResolution(self, resolution):
+		if self.upliftMap.shape[0] == resolution:
+			return
+
+		newDim = (resolution, resolution)
+
+		upliftImage = Image.fromarray((self.upliftMap * 255).astype(np.uint8))
+		upliftImage = upliftImage.resize(newDim, Image.BILINEAR)
+		self.upliftMap = np.array(upliftImage, dtype=np.float32) / 255.0
+
+		erosionScaleImage = Image.fromarray((self.erosionScale * 255).astype(np.uint8))
+		erosionScaleImage = erosionScaleImage.resize(newDim, Image.BILINEAR)
+		self.erosionScale = np.array(erosionScaleImage, dtype=np.float32) / 255.0
+
+		steepestSlopeImage = Image.fromarray((self.steepestSlopeDegree * 255).astype(np.uint8))
+		steepestSlopeImage = steepestSlopeImage.resize(newDim, Image.BILINEAR)
+		self.steepestSlopeDegree = np.array(steepestSlopeImage, dtype=np.float32) / 255.0
+
+		drainageImage = Image.fromarray((self.drainageDegree * 255).astype(np.uint8))
+		drainageImage = drainageImage.resize(newDim, Image.BILINEAR)
+		self.drainageDegree = np.array(drainageImage, dtype=np.float32) / 255.0
+
+		heightImage = Image.fromarray((self.heightMap * 255).astype(np.uint8))
+		heightImage = heightImage.resize(newDim, Image.BILINEAR)
+		self.heightMap = np.array(heightImage, dtype=np.float32) / 255.0
+
+		erosionImage = Image.fromarray((self.erosion * 255).astype(np.uint8))
+		erosionImage = erosionImage.resize(newDim, Image.BILINEAR)
+		self.erosion = np.array(erosionImage, dtype=np.float32) / 255.0
+
+		self.dim = newDim
 
 	# Gets the steepest slope downard slope at each position in the height map
 	# The slope is only calculated when a neighbor is lower than the current position
