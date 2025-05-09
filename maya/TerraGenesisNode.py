@@ -256,7 +256,7 @@ class TerraGenesisNode(ompx.MPxNode):
     kNodeId   = om.MTypeId(0x00082000)
 
     # Attributes
-    aUpliftPath           = None    # String attribute: uplift image file path
+    aElevationPath           = None    # String attribute: uplift image file path
     aTimeStep             = None    # Float attribute: simulation time step
     aIterations           = None    # Int attribute: number of simulation iterations
     aCurrentIteration     = None    # Int attribute: number of processed simulation iterations
@@ -287,6 +287,7 @@ class TerraGenesisNode(ompx.MPxNode):
         self.maxDrainageDegree = 2
 
         self.ui = None
+        self.elevationPath = ""
 
     def compute(self, plug, dataBlock):
         # Only compute the output mesh
@@ -296,7 +297,7 @@ class TerraGenesisNode(ompx.MPxNode):
         nodeName = "TerraGenesisNode"
 
         # Retrieve input attribute values
-        upliftPath           = dataBlock.inputValue(TerraGenesisNode.aUpliftPath).asString()
+        elevationPath           = dataBlock.inputValue(TerraGenesisNode.aElevationPath).asString()
         timeStep             = dataBlock.inputValue(TerraGenesisNode.aTimeStep).asFloat()
         iterations           = dataBlock.inputValue(TerraGenesisNode.aIterations).asInt()
         currentIteration     = dataBlock.inputValue(TerraGenesisNode.aCurrentIteration).asInt()
@@ -337,10 +338,23 @@ class TerraGenesisNode(ompx.MPxNode):
             self.mModel = TerraGenesis.Simulator(upliftArray)
             self.mElevationImage = Image.fromarray(self.mModel.heightMap * 255)
             self.mErosion=np.zeros_like(self.mModel.heightMap)
+
+            targetElevation = self.loadElevationImage(elevationPath)
+            if targetElevation is not None:
+                self.mModel.setTargetElevation(targetElevation)
+
             cmds.setAttr(nodeName + ".doReset", 0)
 
             if (self.ui is not None):
                 self.ui.update()
+
+        if self.elevationPath != elevationPath:
+            self.elevationPath = elevationPath
+
+            targetElevation = self.loadElevationImage(elevationPath)
+
+            if targetElevation is not None:
+                self.mModel.setTargetElevation(targetElevation)
 
         # Run a basic simulation: for each iteration, add uplift scaled by the time step
         if self.mElevationImage != None:
@@ -360,6 +374,20 @@ class TerraGenesisNode(ompx.MPxNode):
         outHandle.setMObject(meshData)
         dataBlock.setClean(plug)
         
+
+    def loadElevationImage(self, path):
+        if not path:
+            return None
+
+        path = path.replace("/", "\\")
+        try:
+            with Image.open(path) as img:
+                img = img.convert("L")
+                img = img.resize(self.mModel.dim, Image.BILINEAR)
+                return np.array(img, dtype=np.float32) / 255
+        except Exception as e:
+            om.MGlobal.displayInfo(f"Failed to load elevation target")
+            return None
 
     def loadUpliftImage(self, path, dims):
         """
@@ -513,6 +541,18 @@ class TerraGenesisNode(ompx.MPxNode):
         degree = value * (self.maxDrainageDegree - self.minDrainageDegree) + self.minDrainageDegree
         self.mModel.drainageDegree = degree
 
+    def getTargetElevation_EDITOR(self):
+        return self.mModel.targetElevation
+
+    def setTargetElevation_EDITOR(self, value):
+        self.mModel.targetElevation = value
+
+    def getTargetScale_EDITOR(self):
+        return self.mModel.targetScale
+
+    def setTargetScale_EDITOR(self, value):
+        self.mModel.targetScale = value
+
     def getHeight_EDITOR(self):
         return self.mModel.heightMap
 
@@ -534,9 +574,9 @@ class TerraGenesisNode(ompx.MPxNode):
                 pass
 
             self.ui = EditorUI(
-                ["Uplift", "Erosion", "Slope Contribution", "Drainage Contribution", "Height"],
-                [self.getUplift_EDITOR, self.getErosion_EDITOR, self.getSlopeContribution_EDITOR, self.getDrainageContribution_EDITOR, self.getHeight_EDITOR],
-                [self.setUplift_EDITOR, self.setErosion_EDITOR, self.setSlopeContribution_EDITOR, self.setDrainageContribution_EDITOR, self.setHeight_EDITOR])
+                ["Uplift", "Erosion", "Slope Contribution", "Drainage Contribution", "Target", "Target Contribution", "Height"],
+                [self.getUplift_EDITOR, self.getErosion_EDITOR, self.getSlopeContribution_EDITOR, self.getDrainageContribution_EDITOR, self.getTargetElevation_EDITOR, self.getTargetScale_EDITOR, self.getHeight_EDITOR],
+                [self.setUplift_EDITOR, self.setErosion_EDITOR, self.setSlopeContribution_EDITOR, self.setDrainageContribution_EDITOR, self.setTargetElevation_EDITOR, self.setTargetScale_EDITOR, self.setHeight_EDITOR])
             self.ui.show()
 
         maya.utils.executeDeferred(_show_ui)
@@ -554,10 +594,10 @@ class TerraGenesisNode(ompx.MPxNode):
         eAttr = om.MFnEnumAttribute() 
         # Uplift Path attribute (string, used as filename)
         defaultStr = strDataFn.create("")
-        TerraGenesisNode.aUpliftPath = typeAttrFn.create("upliftFile", "upf", om.MFnData.kString, defaultStr)
+        TerraGenesisNode.aElevationPath = typeAttrFn.create("elevationFile", "evf", om.MFnData.kString, defaultStr)
         setInputAttr(typeAttrFn)
         typeAttrFn.usedAsFilename = True
-        ompx.MPxNode.addAttribute(TerraGenesisNode.aUpliftPath)
+        ompx.MPxNode.addAttribute(TerraGenesisNode.aElevationPath)
 
         # Time Step attribute (float)
         TerraGenesisNode.aTimeStep = numAttrFn.create("timeStep", "ts", om.MFnNumericData.kFloat, 0.1)
@@ -640,7 +680,7 @@ class TerraGenesisNode(ompx.MPxNode):
         ompx.MPxNode.addAttribute(TerraGenesisNode.aMode)
 
         # Define attribute affects so that changes in any input update the mesh
-        ompx.MPxNode.attributeAffects(TerraGenesisNode.aUpliftPath, TerraGenesisNode.aMeshOutput)
+        ompx.MPxNode.attributeAffects(TerraGenesisNode.aElevationPath, TerraGenesisNode.aMeshOutput)
         ompx.MPxNode.attributeAffects(TerraGenesisNode.aTimeStep, TerraGenesisNode.aMeshOutput)
         ompx.MPxNode.attributeAffects(TerraGenesisNode.aIterations, TerraGenesisNode.aMeshOutput)
         ompx.MPxNode.attributeAffects(TerraGenesisNode.aCurrentIteration, TerraGenesisNode.aMeshOutput)

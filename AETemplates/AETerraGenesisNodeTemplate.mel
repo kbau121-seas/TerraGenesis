@@ -49,7 +49,7 @@ global proc updateControls(string $nodeName)
 	button -e -enable (!$isRunning) btnStart;
 	button -e -enable ($isRunning) btnPause;
 
-	setAttr -l ($isRunning) ($nodeName + "upliftFile");
+	setAttr -l ($isRunning) ($nodeName + "elevationFile");
     setAttr -l ($isRunning) ($nodeName + "gridSizeX");
     setAttr -l ($isRunning) ($nodeName + "gridSizeZ");
 }
@@ -81,6 +81,33 @@ global proc AE_addSimulationControls(string $nodeName)
 	updateControls($nodeName);
 }
 
+global proc AEfilePathBrowseCallback(string $nodeName, string $textField)
+{
+    string $filePath[] = `fileDialog2 -fileMode 1 -caption "Select File"`;
+    if (size($filePath) > 0) {
+        string $path = $filePath[0];
+        textField -edit -text $path $textField;
+        setAttr -type "string" ($nodeName + "elevationFile") $path;
+    }
+}
+
+global proc AEaddFilePathControl(string $nodeName)
+{
+    string $attr = $nodeName + "elevationFile";
+
+    string $currentValue = `getAttr $attr`;
+
+    rowLayout -numberOfColumns 3 -adjustableColumn 2;
+    
+    text -label "File Path:";
+    
+    string $textField = `textField -text $currentValue`;
+
+    button -label "Browse" -command ("AEfilePathBrowseCallback(\"" + $nodeName + "\", \"" + $textField + "\")");
+
+    setParent ..;
+}
+
 global proc AETerraGenesisNodeTemplate(string $nodeInfo)
 {
 	string $nodeInfoArr[];
@@ -95,7 +122,9 @@ global proc AETerraGenesisNodeTemplate(string $nodeInfo)
     	editorTemplate -callCustom "AE_addEditorControls" "" $nodeName;
     	editorTemplate -callCustom "AE_addSimulationControls" "" $nodeName;
         editorTemplate -addControl -label "Render Mode" "mode";
-    	editorTemplate -addControl "upliftFile";
+    	
+        editorTemplate -callCustom "AEaddFilePathControl" "" $nodeName;
+
         //editorTemplate -addControl "gridSizeX";
         //editorTemplate -addControl "gridSizeZ";
         //editorTemplate -addControl "cellSize";

@@ -23,6 +23,7 @@ class Simulator:
 
 		self.upliftScale = 0.01
 		self.erosionScale = np.full(upliftMap.shape, 0.1)
+		self.targetScale = np.zeros_like(upliftMap)
 
 		self.steepestSlopeDegree = np.full(upliftMap.shape, 2)
 		self.drainageDegree = np.full(upliftMap.shape, 1)
@@ -30,6 +31,7 @@ class Simulator:
 		self.erosion = np.zeros_like(upliftMap)
 		self.upliftMap = upliftMap
 		self.heightMap = upliftMap
+		self.targetElevation = np.zeros_like(upliftMap)
 
 	def setSimulationResolution(self, resolution):
 		if self.upliftMap.shape[0] == resolution:
@@ -61,7 +63,20 @@ class Simulator:
 		erosionImage = erosionImage.resize(newDim, Image.BILINEAR)
 		self.erosion = np.array(erosionImage, dtype=np.float32) / 255.0
 
+		targetElevationImage = Image.fromarray((self.targetElevation * 255).astype(np.uint8))
+		targetElevationImage = targetElevationImage.resize(newDim, Image.BILINEAR)
+		self.targetElevation = np.array(targetElevationImage, dtype=np.float32) / 255.0
+
+		targetScaleImage = Image.fromarray((self.targetScale * 255).astype(np.uint8))
+		targetScaleImage = targetScaleImage.resize(newDim, Image.BILINEAR)
+		self.targetScale = np.array(targetScaleImage, dtype=np.float32) / 255.0
+
 		self.dim = newDim
+
+	def setTargetElevation(self, targetElevation):
+		targetElevationImage = Image.fromarray((targetElevation * 255).astype(np.uint8))
+		targetElevationImage = targetElevationImage.resize(self.dim, Image.BILINEAR)
+		self.targetElevation = np.array(targetElevationImage, dtype=np.float32) / 255.0
 
 	# Gets the steepest slope downard slope at each position in the height map
 	# The slope is only calculated when a neighbor is lower than the current position
@@ -139,6 +154,8 @@ class Simulator:
 
 			deltaHeight  = self.upliftMap * self.upliftScale
 			deltaHeight -= erosion * self.erosionScale
+			deltaHeight += (self.targetElevation - self.heightMap) * np.power(self.targetScale, 2)
+
 			deltaHeight *= self.timeScale
 
 			self.heightMap = np.clip(self.heightMap + deltaHeight, 0, 1)
