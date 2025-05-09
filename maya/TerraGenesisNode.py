@@ -54,6 +54,8 @@ class ViewWidget(QtWidgets.QWidget):
 
         activeMap = self.getter()
         if activeMap is not None:
+            activeMap = (activeMap * 255).astype(np.uint8)
+
             image_h, image_w = activeMap.shape
             widget_w, widget_h = self.width(), self.height()
 
@@ -127,17 +129,16 @@ class PaintWidget(QtWidgets.QWidget):
             return
 
         if 0 <= x < image_w and 0 <= y < image_h:
-            deltaMap = np.zeros_like(activeMap).astype(np.int32)
+            deltaMap = np.zeros_like(activeMap)
 
             sigma = ((self.hardness / 100) ** 2) * 20
-            strength = ((self.strength / 100) ** 2) * 2000 * sigma
+            strength = ((self.strength / 100) ** 2) * 20 * sigma
 
             deltaMap[y, x] += strength * sign
-            deltaMap = gaussian_filter(deltaMap, sigma=sigma).astype(np.int32)
+            deltaMap = gaussian_filter(deltaMap, sigma=sigma)
 
-            activeMap = activeMap.astype(np.int32) + deltaMap
-            activeMap = activeMap.clip(0, 255)
-            activeMap = activeMap.astype(np.uint8)
+            activeMap = activeMap + deltaMap
+            activeMap = activeMap.clip(0, 1)
 
             self.setters[self.active](activeMap)
             self.update()
@@ -149,6 +150,8 @@ class PaintWidget(QtWidgets.QWidget):
 
         activeMap = self.getters[self.active]()
         if activeMap is not None:
+            activeMap = (activeMap * 255).astype(np.uint8)
+
             image_h, image_w = activeMap.shape
             widget_w, widget_h = self.width(), self.height()
 
@@ -470,42 +473,43 @@ class TerraGenesisNode(ompx.MPxNode):
         return meshObj
 
     def getUplift_EDITOR(self):
-        return (self.mModel.upliftMap * 255).astype(np.uint8)
+        return self.mModel.upliftMap
 
     def setUplift_EDITOR(self, value):
-        self.mModel.upliftMap = value.astype(np.float32) / 255
+        self.mModel.upliftMap = value
 
     def getErosion_EDITOR(self):
-        return (self.mModel.erosionScale * (5 * 255)).astype(np.uint8)
+        return self.mModel.erosionScale
 
     def setErosion_EDITOR(self, value):
-        self.mModel.erosionScale = value.astype(np.float32) / (5 * 255)
+        self.mModel.erosionScale = value
 
     def getSlopeContribution_EDITOR(self):
         degree = self.mModel.steepestSlopeDegree
         percent = (degree - self.minSlopeDegree) / (self.maxSlopeDegree - self.minSlopeDegree)
 
-        return ((1 - percent) * 255).astype(np.uint8)
+        return (1 - percent)
 
     def setSlopeContribution_EDITOR(self, value):
-        degree = (1 - (value.astype(np.float32) / 255)) * (self.maxSlopeDegree - self.minSlopeDegree) + self.minSlopeDegree
+        degree = (1 - value) * (self.maxSlopeDegree - self.minSlopeDegree) + self.minSlopeDegree
         self.mModel.steepestSlopeDegree = degree
 
     def getDrainageContribution_EDITOR(self):
         degree = self.mModel.drainageDegree
         percent = (degree - self.minDrainageDegree) / (self.maxDrainageDegree - self.minDrainageDegree)
 
-        return (percent * 255).astype(np.uint8)
+        return percent
 
     def setDrainageContribution_EDITOR(self, value):
-        degree = (value.astype(np.float32) / 255) * (self.maxDrainageDegree - self.minDrainageDegree) + self.minDrainageDegree
+        degree = value * (self.maxDrainageDegree - self.minDrainageDegree) + self.minDrainageDegree
         self.mModel.drainageDegree = degree
 
     def getHeight_EDITOR(self):
-        return (self.mModel.heightMap * 255).astype(np.uint8)
+        return self.mModel.heightMap
 
     def setHeight_EDITOR(self, value):
-        self.mModel.heightMap = value.astype(np.float32) / 255
+        self.mModel = value
+
         self.ui.onHeightChanged()
 
         if (not self.isRunning):
