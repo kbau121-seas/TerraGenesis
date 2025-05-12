@@ -99,7 +99,7 @@ global proc AEaddFilePathControl(string $nodeName)
 
     rowLayout -numberOfColumns 3 -adjustableColumn 2;
     
-    text -label "File Path:";
+    text -label "Height Map Path";
     
     string $textField = `textField -text $currentValue`;
 

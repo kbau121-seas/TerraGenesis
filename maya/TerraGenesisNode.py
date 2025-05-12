@@ -34,6 +34,7 @@ def get_maya_main_window():
     main_window_ptr = omui.MQtUtil.mainWindow()
     return wrapInstance(int(main_window_ptr), QtWidgets.QMainWindow)
 
+# Panel for viewing the current height map
 class ViewWidget(QtWidgets.QWidget):
     def __init__(self, getter, parent=None):
         super(ViewWidget, self).__init__(parent)
@@ -47,6 +48,7 @@ class ViewWidget(QtWidgets.QWidget):
         self.setMinimumWidth(activeMap.shape[1])
         self.update()
 
+    # Paints the height map scaled to as large as possible
     def paintEvent(self, event):
         painter = QtGui.QPainter(self)
         painter.setRenderHint(QtGui.QPainter.SmoothPixmapTransform)
@@ -80,7 +82,9 @@ class ViewWidget(QtWidgets.QWidget):
 
         painter.end()
 
+# Panel for parameter painting
 class PaintWidget(QtWidgets.QWidget):
+    # getters/setters are lists of functions where the last one should always be the height map
     def __init__(self, getters, setters, parent=None):
         super(PaintWidget, self).__init__(parent)
 
@@ -94,6 +98,7 @@ class PaintWidget(QtWidgets.QWidget):
 
         self.setActive(0)
 
+    # Sets the actively drawn and paintable parameter map
     def setActive(self, index):
         self.active = index
 
@@ -103,6 +108,7 @@ class PaintWidget(QtWidgets.QWidget):
 
         self.update()
 
+    # Handles painting
     def mouseMoveEvent(self, event):
         activeMap = self.getters[self.active]()
 
@@ -131,7 +137,9 @@ class PaintWidget(QtWidgets.QWidget):
         if 0 <= x < image_w and 0 <= y < image_h:
             deltaMap = np.zeros_like(activeMap)
 
+            # Spread
             sigma = ((self.hardness / 100) ** 2) * 20
+            # Strength
             strength = ((self.strength / 100) ** 2) * 20 * sigma
 
             deltaMap[y, x] += strength * sign
@@ -143,6 +151,7 @@ class PaintWidget(QtWidgets.QWidget):
             self.setters[self.active](activeMap)
             self.update()
 
+    # Paints the currently active parameter map
     def paintEvent(self, event):
         painter = QtGui.QPainter(self)
         painter.setRenderHint(QtGui.QPainter.SmoothPixmapTransform)
@@ -176,7 +185,9 @@ class PaintWidget(QtWidgets.QWidget):
 
         painter.end()
 
+# Window for the full parameter editor
 class EditorUI(QtWidgets.QDialog):
+    # getters/setters are lists of functions where the last one is always the height map
     def __init__(self, parameters, getters, setters, parent=get_maya_main_window()):
         super(EditorUI, self).__init__(parent)
 
@@ -191,15 +202,19 @@ class EditorUI(QtWidgets.QDialog):
         self.create_widgets()
         self.create_layout()
 
+    # Callback function for the strength slider
     def updateStrength(self, value):
         self.painter.strength = value
 
+    # Callback function for the hardness slider
     def updateHardness(self, value):
         self.painter.hardness = value
 
+    # Callback function for the parameter selector
     def parameterChanged(self, index):
         self.painter.setActive(index)
 
+    # Callback function for when another object changes the height map
     def onHeightChanged(self):
         self.view.update()
 
@@ -376,6 +391,10 @@ class TerraGenesisNode(ompx.MPxNode):
         
 
     def loadElevationImage(self, path):
+        """
+        Loads an image from 'path', converts it to grayscale,
+        normalizes the pixel values to [0,1], and resizes it to 'dims'.
+        """
         if not path:
             return None
 
@@ -509,6 +528,8 @@ class TerraGenesisNode(ompx.MPxNode):
 
         return meshObj
 
+    # === PARAMETER EDITOR SETTERS/GETTERS ===
+
     def getUplift_EDITOR(self):
         return self.mModel.upliftMap
 
@@ -563,6 +584,8 @@ class TerraGenesisNode(ompx.MPxNode):
 
         if (not self.isRunning):
             maya.utils.executeInMainThreadWithResult(self.testUpdate_main)
+
+    # ===
 
     def showEditor(self):
         def _show_ui():
@@ -695,6 +718,7 @@ class TerraGenesisNode(ompx.MPxNode):
         ompx.MPxNode.attributeAffects(TerraGenesisNode.aMode, TerraGenesisNode.aMeshOutput)
 
 
+    # Handles main thread UI calls on node update
     def testUpdate_main(self):
         self.mElevationImage = Image.fromarray(self.mModel.heightMap * 255)
         #self.mErosion=self.mModel.erosion
@@ -705,6 +729,7 @@ class TerraGenesisNode(ompx.MPxNode):
         if self.ui is not None:
             self.ui.onHeightChanged()
 
+    # Advances the model and updates the display
     def testUpdate(self):
         self.mModel.run(1)
 
