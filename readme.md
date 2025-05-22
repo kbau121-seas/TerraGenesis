@@ -1,5 +1,9 @@
 # TerraGenesis
 
+<p align="center">
+  <a href="https://www.youtube.com/watch?v=X24ZHHVyrsQ"><img src="https://img.youtube.com/vi/X24ZHHVyrsQ/0.jpg" /></a>
+</p>
+
 An interactive tool based on the work of [Schott et al.](https://dl.acm.org/doi/10.1145/3592787) for authoring terrain.
 
 ![Output](https://github.com/user-attachments/assets/34a79e53-6b9f-4a59-85c0-241ed5d29796)
